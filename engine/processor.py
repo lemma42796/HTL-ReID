@@ -20,6 +20,59 @@ def normalize(x, axis=-1):
     return x
 
 
+def _as_bool(value):
+    if isinstance(value, str):
+        return value.lower() in ('yes', 'true', '1', 'on')
+    return bool(value)
+
+
+def _make_evaluator(cfg, num_query):
+    reranking = _as_bool(cfg.TEST.RE_RANKING)
+    if cfg.DATASETS.NAMES == "MSVR310":
+        return R1_mAP(num_query, max_rank=50, feat_norm=cfg.TEST.FEAT_NORM, reranking=reranking)
+    return R1_mAP_eval(num_query, max_rank=50, feat_norm=cfg.TEST.FEAT_NORM, reranking=reranking)
+
+
+def _log_eval_results(logger, cmc, mAP, epoch=None):
+    if epoch is None:
+        logger.info("Validation Results")
+    else:
+        logger.info("Validation Results - Epoch: {}".format(epoch))
+    logger.info("mAP: {:.2%}".format(mAP))
+    for r in [1, 5, 10]:
+        logger.info("CMC curve, Rank-{:<3}:{:.2%}".format(r, cmc[r - 1]))
+
+
+def _stage_scale(epoch, warmup_epochs):
+    warmup_epochs = int(warmup_epochs)
+    if warmup_epochs <= 0:
+        return 1.0
+    return min(1.0, float(epoch) / float(warmup_epochs))
+
+
+def _pair_loss_weight(cfg, pair_idx, num_pairs):
+    if pair_idx == 0:
+        return float(cfg.MODEL.FUSE_LOSS_WEIGHT)
+    if cfg.MODEL.PART_BRANCH and pair_idx == num_pairs - 1:
+        return float(cfg.MODEL.PART_LOSS_WEIGHT)
+    return float(cfg.MODEL.BRANCH_LOSS_WEIGHT)
+
+
+def _compute_train_loss(cfg, output, loss_fn, target, target_cam, epoch):
+    pair_end = len(output) - 1 if len(output) % 2 == 1 else len(output)
+    num_pairs = pair_end // 2
+    loss = 0
+    for pair_idx, i in enumerate(range(0, pair_end, 2)):
+        loss_tmp = loss_fn(score=output[i], feat=output[i + 1],
+                           target=target, target_cam=target_cam)
+        loss = loss + _pair_loss_weight(cfg, pair_idx, num_pairs) * loss_tmp
+    if len(output) % 2 == 1:
+        aux_weight = float(cfg.MODEL.AUX_LOSS_WEIGHT) * _stage_scale(
+            epoch, cfg.MODEL.AUX_WARMUP_EPOCHS)
+        loss = loss + aux_weight * output[-1]
+    return loss
+
+
 def do_train(cfg,
              model,
              center_criterion,
@@ -48,16 +101,15 @@ def do_train(cfg,
             print('Using {} GPUs for training'.format(torch.cuda.device_count()))
             model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],
                                                               find_unused_parameters=True)
-    if cfg.DATASETS.NAMES == "MSVR310":
-        evaluator_m = R1_mAP(num_query, max_rank=50, feat_norm=cfg.TEST.FEAT_NORM)
-    else:
-        evaluator_m = R1_mAP_eval(num_query, max_rank=50, feat_norm=cfg.TEST.FEAT_NORM)
+    evaluator_m = _make_evaluator(cfg, num_query)
     evaluator_m.reset()
 
 
     loss_meter = AverageMeter()
     acc_meter = AverageMeter()
     scaler = amp.GradScaler()
+    scheduler_in_epochs = getattr(scheduler, 't_in_epochs', True)
+    updates_per_epoch = len(train_loader)
 
     best_index = {'mAP': 0, "Rank-1": 0, 'Rank-5': 0, 'Rank-10': 0}
     for epoch in range(1, epochs + 1):
@@ -65,9 +117,13 @@ def do_train(cfg,
         loss_meter.reset()
         evaluator_m.reset()
         acc_meter.reset()
-        scheduler.step(epoch)
+        if scheduler_in_epochs:
+            scheduler.step(epoch)
         model.train()
         for n_iter, (img, vid, target_cam, target_view, imgpath) in enumerate(train_loader):
+            if not scheduler_in_epochs:
+                num_updates = (epoch - 1) * updates_per_epoch + n_iter
+                scheduler.step_update(num_updates)
             optimizer.zero_grad()
             optimizer_center.zero_grad()
             img = {'RGB': img['RGB'].to(device),
@@ -79,17 +135,7 @@ def do_train(cfg,
             with amp.autocast(enabled=True):
                 output = model(img, label=target, cam_label=target_cam, view_label=target_view, img_path=imgpath,
                                writer=writer, epoch=epoch)
-                loss = 0
-                if len(output) % 2 == 1:
-                    index = len(output) - 1
-                    for i in range(0, index, 2):
-                        loss_tmp = loss_fn(score=output[i], feat=output[i + 1], target=target, target_cam=target_cam)
-                        loss = loss + loss_tmp
-                    loss = loss + output[-1]
-                else:
-                    for i in range(0, len(output), 2):
-                        loss_tmp = loss_fn(score=output[i], feat=output[i + 1], target=target, target_cam=target_cam)
-                        loss = loss + loss_tmp
+                loss = _compute_train_loss(cfg, output, loss_fn, target, target_cam, epoch)
             writer.add_scalar('Loss', loss.item(), epoch)
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -109,7 +155,7 @@ def do_train(cfg,
                 # print(scheduler._get_lr(epoch))
                 logger.info("Epoch[{}] Iteration[{}/{}] Loss: {:.3f}, Acc: {:.3f}, Base Lr: {:.2e}"
                             .format(epoch, (n_iter + 1), len(train_loader),
-                                    loss_meter.avg, acc_meter.avg, scheduler._get_lr(epoch)[0]))
+                                    loss_meter.avg, acc_meter.avg, optimizer.param_groups[0]['lr']))
 
         end_time = time.time()
         time_per_batch = (end_time - start_time) / (n_iter + 1)
@@ -148,10 +194,7 @@ def do_train(cfg,
 
                     # 计算多模态性能
                     cmc, mAP, _, _, _, _, _ = evaluator_m.compute(cfg)
-                    logger.info("Validation Results - Epoch: {}".format(epoch))
-                    logger.info("mAP: {:.2%}".format(mAP))
-                    for r in [1, 5, 10]:
-                        logger.info("CMC curve, Rank-{:<3}:{:.2%}".format(r, cmc[r - 1]))
+                    _log_eval_results(logger, cmc, mAP, epoch=epoch)
                     writer.add_scalar('MM/mAP', mAP.item(), epoch)
                     writer.add_scalar('MM/Rank-1', cmc[0].item(), epoch)
 
@@ -187,10 +230,7 @@ def do_train(cfg,
 
                 # 计算多模态性能
                 cmc, mAP, _, _, _, _, _ = evaluator_m.compute(cfg)
-                logger.info("Validation Results - Epoch: {}".format(epoch))
-                logger.info("mAP: {:.2%}".format(mAP))
-                for r in [1, 5, 10]:
-                    logger.info("CMC curve, Rank-{:<3}:{:.2%}".format(r, cmc[r - 1]))
+                _log_eval_results(logger, cmc, mAP, epoch=epoch)
                 writer.add_scalar('MM/mAP', mAP.item(), epoch)
                 writer.add_scalar('MM/Rank-1', cmc[0].item(), epoch)
 
@@ -222,10 +262,7 @@ def do_inference(cfg,
     logger = logging.getLogger("HTL-ReID.test")
     logger.info("Enter inferencing")
 
-    if cfg.DATASETS.NAMES == "MSVR310":
-        evaluator_m = R1_mAP(num_query, max_rank=50, feat_norm=cfg.TEST.FEAT_NORM)
-    else:
-        evaluator_m = R1_mAP_eval(num_query, max_rank=50, feat_norm=cfg.TEST.FEAT_NORM)
+    evaluator_m = _make_evaluator(cfg, num_query)
     evaluator_m.reset()
 
 
@@ -249,6 +286,8 @@ def do_inference(cfg,
 
 
             torch.cuda.empty_cache()
+            cmc, mAP, _, _, _, _, _ = evaluator_m.compute(cfg)
+            _log_eval_results(logger, cmc, mAP)
 
     else:
         model.eval()
@@ -268,3 +307,5 @@ def do_inference(cfg,
                     evaluator_m.update((feat, vid, camid))
 
         torch.cuda.empty_cache()
+        cmc, mAP, _, _, _, _, _ = evaluator_m.compute(cfg)
+        _log_eval_results(logger, cmc, mAP)

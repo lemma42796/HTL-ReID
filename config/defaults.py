@@ -41,6 +41,7 @@ _C.MODEL.AL = 0
 _C.MODEL.HEAD_KEEP = 1
 # The keep tokens in the Frequency Selection Part
 _C.MODEL.FREQUENCY_KEEP=10
+_C.MODEL.FREQUENCY_QUALITY_AWARE = 1
 # HS (Hierarchical Token Selection)
 _C.MODEL.HS_LAYERS = [4, 8, 12]
 _C.MODEL.HS_K = 16
@@ -83,10 +84,19 @@ _C.MODEL.MODALITY_ADAPTER_SCALE = 0.5
 # Local identity evidence from selected tokens.
 _C.MODEL.PART_BRANCH = 1
 _C.MODEL.PART_NUM = 3
+# Part pooling: 'stripe' keeps the fixed horizontal pooling; 'semantic' learns
+# selected-token part prototypes shared across modalities.
+_C.MODEL.PART_POOL = 'semantic'
 # Auxiliary cross-modal constraints.
 _C.MODEL.ALIGN_LOSS_WEIGHT = 0.2
 _C.MODEL.TOKEN_CONSISTENCY_WEIGHT = 0.05
 _C.MODEL.GATE_BALANCE_WEIGHT = 0.01
+_C.MODEL.QUALITY_PERTURB_LOSS_WEIGHT = 0.05
+_C.MODEL.FUSE_LOSS_WEIGHT = 1.0
+_C.MODEL.BRANCH_LOSS_WEIGHT = 0.5
+_C.MODEL.PART_LOSS_WEIGHT = 0.5
+_C.MODEL.AUX_LOSS_WEIGHT = 1.0
+_C.MODEL.AUX_WARMUP_EPOCHS = 20
 
 # Transformer setting
 _C.MODEL.DROP_PATH = 0.1
@@ -182,6 +192,9 @@ _C.SOLVER.WARMUP_FACTOR = 0.01
 _C.SOLVER.WARMUP_ITERS = 20
 # method of warm up, option: 'constant','linear'
 _C.SOLVER.WARMUP_METHOD = "linear"
+# Scheduler step unit, options: 'iteration' or 'epoch'. Keep 'iteration' so
+# WARMUP_ITERS is interpreted literally instead of as warmup epochs.
+_C.SOLVER.SCHEDULER_UNIT = "iteration"
 
 _C.SOLVER.COSINE_MARGIN = 0.5
 _C.SOLVER.COSINE_SCALE = 30
@@ -217,6 +230,10 @@ _C.TEST.WEIGHT = ""
 _C.TEST.NECK_FEAT = 'before'
 # Whether feature is nomalized before test, if yes, it is equivalent to cosine distance
 _C.TEST.FEAT_NORM = 'yes'
+# Optional test-time fusion with the trained part branch. 'concat' appends a
+# normalized part descriptor; set to 'off' to use the fused descriptor alone.
+_C.TEST.PART_FEAT = 'concat'
+_C.TEST.PART_FEAT_WEIGHT = 1.0
 # ----------------------------------------------------------a------------------ #
 # Misc options
 # ---------------------------------------------------------------------------- #

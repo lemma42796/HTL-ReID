@@ -9,14 +9,16 @@ pretrained weights. This is the test others should run after `pip install
 Coverage:
   1. cfg defaults load and freeze
   2. Each shipped yml config merges cleanly into defaults
-  3. Model builds for each yml (PRETRAIN_CHOICE forced off so no .pth needed)
-  4. 3-modal training forward returns the right tuple length and shapes
-  5. 3-modal eval forward
-  6. 2-modal forward_two_modalities (RGBN300-style path)
-  7. Backward populates non-NaN gradients on every trainable parameter
-  8. Loss assembly matches engine/processor.py's odd/even pairing rule
-  9. state_dict save -> reload -> identical forward output
- 10. Ablation switches (AGF=0, OCFR=1) each produce a usable model
+  3. Iteration-based scheduler warmup semantics
+  4. Model builds for each yml (PRETRAIN_CHOICE forced off so no .pth needed)
+  5. 3-modal training forward returns the right tuple length and shapes
+  6. 3-modal eval forward
+  7. 2-modal forward_two_modalities (RGBN300-style path)
+  8. Optional test-time part descriptor
+  9. Backward populates non-NaN gradients on every trainable parameter
+ 10. Loss assembly matches engine/processor.py's odd/even pairing rule
+ 11. state_dict save -> reload -> identical forward output
+ 12. Ablation switches (AGF=0, OCFR=1) each produce a usable model
 
 Run:
     python3 test_pipeline.py
@@ -28,6 +30,7 @@ import torch
 
 from config import cfg as default_cfg
 from modeling.make_model import make_model
+from solver.scheduler_factory import create_scheduler
 
 
 YMLS = [
@@ -68,8 +71,18 @@ def _assert_finite(t, name):
     assert torch.isfinite(t).all(), '{} has NaN/Inf'.format(name)
 
 
+def _expected_eval_dim(cfg, model):
+    cls_dim = 3 * model.BACKBONE.token_dim
+    part_dim = 3 * cfg.MODEL.PART_NUM * model.BACKBONE.token_dim
+    if not cfg.MODEL.PART_BRANCH or cfg.TEST.PART_FEAT == 'off':
+        return cls_dim
+    if cfg.TEST.PART_FEAT == 'only':
+        return part_dim
+    return cls_dim + part_dim
+
+
 def _loss_assembly_like_processor(output):
-    """Mirror engine/processor.py:80-92 pairing rule (odd len => last is aux)."""
+    """Lightweight trainability surrogate using the trainer's pair layout."""
     loss = torch.zeros(())
     if len(output) % 2 == 1:
         for i in range(0, len(output) - 1, 2):
@@ -99,8 +112,26 @@ def test_yml_configs_merge():
             y, c.MODEL.AGF, c.MODEL.AL))
 
 
+def test_iteration_scheduler():
+    print('[3] iteration scheduler semantics')
+    c = default_cfg.clone()
+    c.SOLVER.MAX_EPOCHS = 2
+    c.SOLVER.WARMUP_ITERS = 3
+    c.SOLVER.SCHEDULER_UNIT = 'iteration'
+    model = torch.nn.Linear(2, 2)
+    opt = torch.optim.AdamW(model.parameters(), lr=c.SOLVER.BASE_LR)
+    scheduler = create_scheduler(c, opt, num_batches=5)
+    assert scheduler.t_in_epochs is False
+    scheduler.step_update(0)
+    lr0 = opt.param_groups[0]['lr']
+    scheduler.step_update(3)
+    lr3 = opt.param_groups[0]['lr']
+    assert lr3 > lr0, 'warmup lr did not increase: {} -> {}'.format(lr0, lr3)
+    print('     OK lr {:.2e} -> {:.2e}'.format(lr0, lr3))
+
+
 def test_three_modal_pipeline(yml):
-    print('[3] 3-modal train+eval | {}'.format(yml))
+    print('[4] 3-modal train+eval | {}'.format(yml))
     cfg = _make_cfg(yml)
     model = make_model(cfg, num_class=NUM_CLASSES, camera_num=0).cpu()
     model.train()
@@ -151,13 +182,13 @@ def test_three_modal_pipeline(yml):
     model.eval()
     with torch.no_grad():
         cls_eval = model(x, cam_label=None, epoch=0)
-    assert cls_eval.shape == (BATCH, 3 * model.BACKBONE.token_dim)
+    assert cls_eval.shape == (BATCH, _expected_eval_dim(cfg, model))
     _assert_finite(cls_eval, 'eval cls4t')
     print('     eval fwd OK shape={}'.format(tuple(cls_eval.shape)))
 
 
 def test_two_modal_pipeline():
-    print('[4] 2-modal forward_two_modalities (AL=0)')
+    print('[5] 2-modal forward_two_modalities (AL=0)')
     cfg = _make_cfg('configs/RGBNT201/default.yml', **{'MODEL.AL': 0})
     model = make_model(cfg, num_class=NUM_CLASSES, camera_num=0).cpu()
     model.train()
@@ -181,12 +212,26 @@ def test_two_modal_pipeline():
     model.eval()
     with torch.no_grad():
         cls_eval = model.forward_two_modalities(x, cam_label=None, epoch=0)
-    assert cls_eval.shape == (BATCH, 3 * model.BACKBONE.token_dim)
+    assert cls_eval.shape == (BATCH, _expected_eval_dim(cfg, model))
     print('     eval fwd OK')
 
 
+def test_part_descriptor_mode():
+    print('[6] optional test-time part descriptor')
+    cfg = _make_cfg('configs/RGBNT201/default.yml', **{'TEST.PART_FEAT': 'concat'})
+    model = make_model(cfg, num_class=NUM_CLASSES, camera_num=0).cpu()
+    model.eval()
+    x = _dummy_batch(cfg)
+    with torch.no_grad():
+        feat = model(x, cam_label=None, epoch=0)
+    expected_dim = 3 * model.BACKBONE.token_dim + 3 * cfg.MODEL.PART_NUM * model.BACKBONE.token_dim
+    assert feat.shape == (BATCH, expected_dim), 'part concat shape {}'.format(feat.shape)
+    _assert_finite(feat, 'part concat feat')
+    print('     eval fwd OK shape={}'.format(tuple(feat.shape)))
+
+
 def test_save_load_roundtrip():
-    print('[5] state_dict save/load round-trip preserves output')
+    print('[7] state_dict save/load round-trip preserves output')
     cfg = _make_cfg('configs/RGBNT201/default.yml')
     torch.manual_seed(42)
     model = make_model(cfg, num_class=NUM_CLASSES, camera_num=0).cpu()
@@ -221,7 +266,7 @@ def test_save_load_roundtrip():
 
 
 def test_ablation_switches():
-    print('[6] ablation switches')
+    print('[8] ablation switches')
     base_yml = 'configs/RGBNT201/default.yml'
     matrix = [
         {'MODEL.AGF': 0, 'MODEL.OCFR': 0},
@@ -244,9 +289,11 @@ def test_ablation_switches():
 def main():
     test_defaults_load()
     test_yml_configs_merge()
+    test_iteration_scheduler()
     for y in YMLS:
         test_three_modal_pipeline(y)
     test_two_modal_pipeline()
+    test_part_descriptor_mode()
     test_save_load_roundtrip()
     test_ablation_switches()
     print('\n=== ALL PIPELINE TESTS PASSED ===')

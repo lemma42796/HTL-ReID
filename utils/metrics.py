@@ -4,6 +4,12 @@ import torch
 from utils.reranking import re_ranking
 
 
+def _as_bool(value):
+    if isinstance(value, str):
+        return value.lower() in ('yes', 'true', '1', 'on')
+    return bool(value)
+
+
 def euclidean_distance(qf, gf):
     m = qf.shape[0]
     n = gf.shape[0]
@@ -186,11 +192,12 @@ def eval_func(distmat, q_pids, g_pids, q_camids, g_camids, max_rank=50):
     return all_cmc, mAP
 
 class R1_mAP():
-    def __init__(self, num_query, max_rank=50, feat_norm='yes'):
+    def __init__(self, num_query, max_rank=50, feat_norm='yes', reranking=False):
         super(R1_mAP, self).__init__()
         self.num_query = num_query
         self.max_rank = max_rank
-        self.feat_norm = feat_norm
+        self.feat_norm = _as_bool(feat_norm)
+        self.reranking = _as_bool(reranking)
 
     def reset(self):
         self.feats = []
@@ -209,7 +216,7 @@ class R1_mAP():
 
     def compute(self,cfg):
         feats = torch.cat(self.feats, dim=0)
-        if self.feat_norm == 'yes':
+        if self.feat_norm:
             print("The test feature is normalized")
             feats = torch.nn.functional.normalize(feats, dim=1, p=2)
         # query
@@ -225,11 +232,12 @@ class R1_mAP():
 
         g_sceneids = np.asarray(self.sceneids[self.num_query:])  # zxp
 
-        m, n = qf.shape[0], gf.shape[0]
-        distmat = torch.pow(qf, 2).sum(dim=1, keepdim=True).expand(m, n) + \
-                  torch.pow(gf, 2).sum(dim=1, keepdim=True).expand(n, m).t()
-        distmat.addmm_(1, -2, qf, gf.t())
-        distmat = distmat.cpu().numpy()
+        if self.reranking:
+            print('=> Enter reranking')
+            distmat = re_ranking(qf, gf, k1=50, k2=15, lambda_value=0.3)
+        else:
+            print('=> Computing DistMat with euclidean_distance')
+            distmat = euclidean_distance(qf, gf)
         cmc, mAP = eval_func_msrv(distmat, q_pids, g_pids, q_camids, g_camids, q_sceneids, g_sceneids)
         return cmc, mAP, distmat, self.pids, self.camids, qf, gf
 
@@ -239,8 +247,8 @@ class R1_mAP_eval():
         super(R1_mAP_eval, self).__init__()
         self.num_query = num_query
         self.max_rank = max_rank
-        self.feat_norm = feat_norm
-        self.reranking = reranking
+        self.feat_norm = _as_bool(feat_norm)
+        self.reranking = _as_bool(reranking)
 
     def reset(self):
         self.feats = []
@@ -276,4 +284,3 @@ class R1_mAP_eval():
             distmat = euclidean_distance(qf, gf)
         cmc, mAP = eval_func(distmat, q_pids, g_pids, q_camids, g_camids)
         return cmc, mAP, distmat, self.pids, self.camids, qf, gf
-

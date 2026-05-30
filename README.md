@@ -8,9 +8,10 @@ HTL-ReID is a unified framework for nighttime multi-modal (RGB / NIR / TIR) obje
 
 - **Hierarchical Token Selection (HS)** — aggregates attention cues from shallow, middle, and deep ViT layers as complementary spatial priors, while keeping all token features in a single deep semantic space.
 - **Dynamic FACSS** — jointly scores intra-modal discriminability and quality-weighted cross-modal cosine consensus, predicts a per-sample/per-modality token budget, and keeps a soft residual path outside hard top-k selection.
+- **Quality-aware frequency selection** — uses predicted modality reliability to weight RGB / NIR / TIR wavelet cues before frequency tokens enter the FACSS candidate set.
 - **Nighttime modality quality estimation** — predicts RGB / NIR / TIR reliability with a night-scene prior so weak RGB, overexposed NIR, or noisy TIR evidence can be down-weighted per sample.
 - **Quality-aware graph fusion** — replaces fixed rotation fusion with a fully connected RGB-NIR-TIR graph whose edge gates are conditioned on modality quality.
-- **Modality adapters and local part branch** — adds lightweight modality-specific adapters after the shared ViT backbone and a selected-token part-level branch for local identity evidence.
+- **Modality adapters and local part branch** — adds lightweight modality-specific adapters after the shared ViT backbone and a semantic selected-token part branch for local identity evidence.
 - **Cross-modal auxiliary constraints** — adds quality-weighted alignment, token-consistency, and gate-balance losses during training.
 
 HSL is not part of the current model path.
@@ -42,7 +43,8 @@ python train_net.py --config_file configs/RGBNT100/default.yml
 python train_net.py --config_file configs/MSVR310/default.yml
 ```
 
-The default training recipe uses AdamW, a smaller learning rate for the shared ViT backbone, higher-resolution inputs, grayscale patch replacement, modality dropout, ID + triplet supervision, part-branch supervision, and cross-modal auxiliary losses.
+The default training recipe uses AdamW, a smaller learning rate for the shared ViT backbone, higher-resolution inputs, grayscale patch replacement, modality dropout, quality-aware frequency selection, ID + triplet supervision, semantic part-branch supervision, staged branch/auxiliary loss weighting, and cross-modal auxiliary losses.
+`SOLVER.WARMUP_ITERS` is update-based by default via `SOLVER.SCHEDULER_UNIT: iteration`; set the unit to `epoch` only when you intentionally want epoch-level scheduling.
 
 You can override any config field from the command line, e.g.:
 ```bash
@@ -58,6 +60,7 @@ python test_net.py --config_file configs/RGBNT201/default.yml \
 ```
 
 `TEST.RE_RANKING` is enabled by default in the dataset YAML files for final evaluation.
+The trained part branch is evaluated by default with `TEST.PART_FEAT concat`, which appends a normalized part descriptor to the fused descriptor. Set `TEST.PART_FEAT off` to recover the fused descriptor alone.
 
 ## Smoke Test
 Run the CPU-only pipeline test after installation or code changes:
@@ -66,7 +69,7 @@ Run the CPU-only pipeline test after installation or code changes:
 python test_pipeline.py
 ```
 
-The smoke test checks config merging, 3-modal and 2-modal forward/backward passes, save/load round-trip, and ablation switches without real datasets or pretrained weights.
+The smoke test checks config merging, iteration scheduler semantics, 3-modal and 2-modal forward/backward passes, optional part descriptors, save/load round-trip, and ablation switches without real datasets or pretrained weights.
 
 ## License
 This project is released under the terms of the [LICENSE](LICENSE) file in this repository.
