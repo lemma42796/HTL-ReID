@@ -202,6 +202,8 @@ _C.SOLVER.SEED = 1111
 _C.MODEL.NO_MARGIN = True
 # epoch number of saving checkpoints
 _C.SOLVER.CHECKPOINT_PERIOD = 60
+# Save training checkpoints. Disabled by default to keep AutoDL disk usage low.
+_C.SOLVER.SAVE_CHECKPOINTS = False
 # iteration of display training log
 _C.SOLVER.LOG_PERIOD = 10
 # epoch number of validation
