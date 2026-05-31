@@ -14,7 +14,7 @@ _C.MODEL.NAME = 'HTL-ReID'
 # Margin of triplet loss
 _C.MODEL.MARGIN = 0
 # Path to pretrained model of backbone
-_C.MODEL.PRETRAIN_PATH_T = 'your_path_to_pretrained_model'
+_C.MODEL.PRETRAIN_PATH_T = '/root/autodl-tmp/pretrained/vit_base_patch16_224_augreg2_in21k_ft_in1k.pth'
 # Use ImageNet pretrained model to initialize backbone or use self trained model to initialize the whole model
 # Options: 'imagenet' or 'self'
 _C.MODEL.PRETRAIN_CHOICE = 'imagenet'
@@ -138,7 +138,7 @@ _C.DATASETS = CN()
 # List of the dataset names for training, as present in paths_catalog.py
 _C.DATASETS.NAMES = ('RGBNT201')
 # Root directory where datasets should be used (and downloaded if not found)
-_C.DATASETS.ROOT_DIR = ('./data')
+_C.DATASETS.ROOT_DIR = ('/root/autodl-tmp/datasets')
 # -----------------------------------------------------------------------------
 # DataLoader
 # -----------------------------------------------------------------------------
@@ -238,4 +238,4 @@ _C.TEST.PART_FEAT_WEIGHT = 1.0
 # Misc options
 # ---------------------------------------------------------------------------- #
 # Path to checkpoint and saved log of trained model
-_C.OUTPUT_DIR = "./outputs/HTL-ReID"
+_C.OUTPUT_DIR = "/root/autodl-tmp/outputs/HTL-ReID"

@@ -1,7 +1,7 @@
 MODEL:
   PRETRAIN_CHOICE: 'imagenet'
   MIX_DIM: 768
-  PRETRAIN_PATH_T: 'your_pretrain_model_path'
+  PRETRAIN_PATH_T: '/root/autodl-tmp/pretrained/vit_base_patch16_224_augreg2_in21k_ft_in1k.pth'
   TRANSFORMER_TYPE: 'vit_base_patch16_224'
   STRIDE_SIZE: [ 16, 16]
   SIE_CAMERA: True
@@ -31,7 +31,7 @@ INPUT:
   MODALITY_DROP_PROB: 0.1
 DATASETS:
   NAMES: ('RGBNT100')
-  ROOT_DIR: 'your_dataset_path'
+  ROOT_DIR: '/root/autodl-tmp/datasets'
 DATALOADER:
   SAMPLER: 'softmax_triplet'
   NUM_INSTANCE: 16
@@ -49,4 +49,4 @@ TEST:
   WEIGHT: ''
   NECK_FEAT: 'before'
   FEAT_NORM: 'yes'
-OUTPUT_DIR: './outputs/HTL-ReID'
+OUTPUT_DIR: '/root/autodl-tmp/outputs/HTL-ReID'
