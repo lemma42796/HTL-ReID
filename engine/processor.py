@@ -85,7 +85,8 @@ def do_train(cfg,
              num_query, local_rank):
     log_period = cfg.SOLVER.LOG_PERIOD
     checkpoint_period = cfg.SOLVER.CHECKPOINT_PERIOD
-    save_checkpoints = cfg.SOLVER.SAVE_CHECKPOINTS
+    save_best_checkpoint = cfg.SOLVER.SAVE_BEST_CHECKPOINT
+    save_periodic_checkpoints = cfg.SOLVER.SAVE_PERIODIC_CHECKPOINTS
     eval_period = cfg.SOLVER.EVAL_PERIOD
     device = "cuda"
     epochs = cfg.SOLVER.MAX_EPOCHS
@@ -164,7 +165,7 @@ def do_train(cfg,
         logger.info("Epoch {} done. Time per batch: {:.3f}[s] Speed: {:.1f}[samples/s]"
                         .format(epoch, time_per_batch, train_loader.batch_size / time_per_batch))
 
-        if save_checkpoints and checkpoint_period > 0 and epoch % checkpoint_period == 0:
+        if save_periodic_checkpoints and checkpoint_period > 0 and epoch % checkpoint_period == 0:
             if cfg.MODEL.DIST_TRAIN:
                 if dist.get_rank() == 0:
                     torch.save(model.state_dict(),
@@ -204,7 +205,7 @@ def do_train(cfg,
                         best_index['Rank-1'] = cmc[0]
                         best_index['Rank-5'] = cmc[4]
                         best_index['Rank-10'] = cmc[9]
-                        if save_checkpoints:
+                        if save_best_checkpoint:
                             torch.save(model.state_dict(), os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + '_best.pth'))
                     logger.info("Best Multi-Modal mAP: {:.2%}".format(best_index['mAP']))
                     logger.info("Best Multi-Modal Rank-1: {:.2%}".format(best_index['Rank-1']))
@@ -242,7 +243,7 @@ def do_train(cfg,
                     best_index['Rank-1'] = cmc[0]
                     best_index['Rank-5'] = cmc[4]
                     best_index['Rank-10'] = cmc[9]
-                    if save_checkpoints:
+                    if save_best_checkpoint:
                         torch.save(model.state_dict(), os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + '_best.pth'))
                 logger.info("Best Multi-Modal mAP: {:.2%}".format(best_index['mAP']))
                 logger.info("Best Multi-Modal Rank-1: {:.2%}".format(best_index['Rank-1']))

@@ -200,10 +200,12 @@ _C.SOLVER.COSINE_MARGIN = 0.5
 _C.SOLVER.COSINE_SCALE = 30
 _C.SOLVER.SEED = 1111
 _C.MODEL.NO_MARGIN = True
-# epoch number of saving checkpoints
+# epoch number of saving periodic model weights
 _C.SOLVER.CHECKPOINT_PERIOD = 60
-# Save training checkpoints. Disabled by default to keep AutoDL disk usage low.
-_C.SOLVER.SAVE_CHECKPOINTS = False
+# Keep the best model weights for independent testing and evidence.
+_C.SOLVER.SAVE_BEST_CHECKPOINT = True
+# Periodic epoch weights are disabled by default to keep AutoDL disk usage low.
+_C.SOLVER.SAVE_PERIODIC_CHECKPOINTS = False
 # iteration of display training log
 _C.SOLVER.LOG_PERIOD = 10
 # epoch number of validation
