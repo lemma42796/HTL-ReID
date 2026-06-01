@@ -52,21 +52,27 @@ class GatedCrossAttn(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None,
                  drop=0., attn_drop=0., drop_path=0.,
-                 act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+                 act_layer=nn.GELU, norm_layer=nn.LayerNorm,
+                 gate_init_bias=-2.0):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn = CrossAttention(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
             attn_drop=attn_drop, proj_drop=drop)
         self.gate = nn.Linear(2 * dim, dim)
-        # bias = 0 → sigmoid(0) = 0.5: balanced start, symmetric gradient through
-        # both x and delta. Weight stays at PyTorch default (kaiming uniform).
-        nn.init.zeros_(self.gate.bias)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim,
                        act_layer=act_layer, drop=drop)
+        self.reset_gate(gate_init_bias)
+
+    def reset_gate(self, gate_init_bias):
+        nn.init.zeros_(self.gate.weight)
+        nn.init.constant_(self.gate.bias, float(gate_init_bias))
+        nn.init.zeros_(self.mlp.fc2.weight)
+        if self.mlp.fc2.bias is not None:
+            nn.init.zeros_(self.mlp.fc2.bias)
 
     def forward(self, x, y):
         delta = self.attn(self.norm1(x), y)
@@ -86,16 +92,19 @@ class AGF(nn.Module):
     The final [B, 3D] descriptor preserves the original AGF output contract.
     """
 
-    def __init__(self, dim, num_heads):
+    def __init__(self, dim, num_heads, gate_init_bias=-2.0, quality_scale=True):
         super().__init__()
+        self.quality_scale = bool(quality_scale)
         self.cross = GatedCrossAttn(dim, num_heads, mlp_ratio=4., qkv_bias=False,
                                     qk_scale=None, drop=0., attn_drop=0.,
                                     drop_path=0., act_layer=nn.GELU,
-                                    norm_layer=nn.LayerNorm)
+                                    norm_layer=nn.LayerNorm,
+                                    gate_init_bias=gate_init_bias)
         self.self_aggr = GatedCrossAttn(dim, num_heads, mlp_ratio=4., qkv_bias=False,
                                         qk_scale=None, drop=0., attn_drop=0.,
                                         drop_path=0., act_layer=nn.GELU,
-                                        norm_layer=nn.LayerNorm)
+                                        norm_layer=nn.LayerNorm,
+                                        gate_init_bias=gate_init_bias)
         hidden = max(dim // 4, 64)
         self.edge_gate = nn.Sequential(
             nn.LayerNorm(2 * dim + 2),
@@ -103,6 +112,10 @@ class AGF(nn.Module):
             nn.GELU(),
             nn.Linear(hidden, 1),
         )
+        self.apply(self._init_weights)
+        self.cross.reset_gate(gate_init_bias)
+        self.self_aggr.reset_gate(gate_init_bias)
+        nn.init.zeros_(self.edge_gate[-1].weight)
         nn.init.zeros_(self.edge_gate[-1].bias)
 
     def _init_weights(self, m):
@@ -167,7 +180,11 @@ class AGF(nn.Module):
         q_t = quality[:, target_idx]
         cross_mix = other_quality / (q_t + other_quality + 1e-6)
         fused = (1.0 - cross_mix.unsqueeze(-1)) * self_cls + cross_mix.unsqueeze(-1) * cross_cls
-        return fused * (q_t > 0).to(fused.dtype).unsqueeze(-1)
+        if self.quality_scale:
+            scale = q_t
+        else:
+            scale = (q_t > 0).to(fused.dtype)
+        return fused * scale.unsqueeze(-1)
 
     def forward(self, x, y, z, quality_scores=None):
         feats = [x, y, z]

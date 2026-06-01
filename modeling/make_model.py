@@ -187,8 +187,13 @@ class HTLReID(nn.Module):
         if self.test_part_feat not in ('off', 'concat', 'only'):
             raise ValueError("TEST.PART_FEAT must be 'off', 'concat', or 'only'")
 
+        self.selected_patch_blend_weight = float(cfg.MODEL.SELECTED_PATCH_BLEND_WEIGHT)
+        self.agf_residual_weight = float(cfg.MODEL.AGF_RESIDUAL_WEIGHT)
         if self.use_agf:
-            self.AGF = AGF(dim=self.BACKBONE.token_dim, num_heads=cfg.MODEL.AGF_NUM_HEADS)
+            self.AGF = AGF(dim=self.BACKBONE.token_dim,
+                           num_heads=cfg.MODEL.AGF_NUM_HEADS,
+                           gate_init_bias=cfg.MODEL.AGF_GATE_INIT_BIAS,
+                           quality_scale=bool(cfg.MODEL.AGF_QUALITY_SCALE))
         if self.use_adapter:
             self.MODALITY_ADAPTERS = nn.ModuleDict({
                 'RGB': ModalityAdapter(self.BACKBONE.token_dim,
@@ -251,15 +256,44 @@ class HTLReID(nn.Module):
             self.PART_HEAD = nn.Linear(part_dim, num_classes, bias=False)
             self.PART_HEAD.apply(weights_init_classifier)
 
-    @staticmethod
-    def _concat_cls(rgb_feat, nir_feat, tir_feat, quality_scores=None):
-        cls_list = [rgb_feat[:, 0, :], nir_feat[:, 0, :], tir_feat[:, 0, :]]
+    def _pool_selected_patches(self, feat, mask=None):
+        patches = feat[:, 1:, :]
+        if mask is None:
+            return patches.mean(dim=1)
+        mask = mask.to(device=patches.device, dtype=patches.dtype)
+        denom = mask.sum(dim=1, keepdim=True).clamp_min(1.0)
+        return (patches * mask.unsqueeze(-1)).sum(dim=1) / denom
+
+    def _cls_with_selected_context(self, feat, mask=None):
+        cls_token = feat[:, 0, :]
+        if self.selected_patch_blend_weight <= 0:
+            return cls_token
+        patch_context = self._pool_selected_patches(feat, mask)
+        return cls_token + self.selected_patch_blend_weight * patch_context
+
+    def _concat_cls(self, rgb_feat, nir_feat, tir_feat, quality_scores=None, masks=None):
+        masks = masks or (None, None, None)
+        if len(masks) == 2:
+            masks = (masks[0], masks[1], None)
+        cls_list = [
+            self._cls_with_selected_context(rgb_feat, masks[0]),
+            self._cls_with_selected_context(nir_feat, masks[1]),
+            self._cls_with_selected_context(tir_feat, masks[2]),
+        ]
         if quality_scores is not None:
             cls_list = [
                 cls_list[i] * quality_scores[:, i:i + 1]
                 for i in range(3)
             ]
         return torch.cat(cls_list, dim=-1)
+
+    def _agf_cls(self, rgb_feat, nir_feat, tir_feat, quality_scores=None, masks=None):
+        base_cls = self._concat_cls(rgb_feat, nir_feat, tir_feat,
+                                    quality_scores, masks=masks)
+        agf_cls = self.AGF(rgb_feat, nir_feat, tir_feat,
+                           quality_scores=quality_scores)
+        weight = max(0.0, min(1.0, self.agf_residual_weight))
+        return base_cls + weight * (agf_cls - base_cls)
 
     def _apply_modality_dropout(self, rgb, nir, tir=None, return_keep=False):
         if (not self.training) or self.modality_drop_prob <= 0:
@@ -480,9 +514,11 @@ class HTLReID(nn.Module):
                                                                      quality_scores=quality_scores)
 
             if self.use_agf:
-                cls4t = self.AGF(RGB_feat_s, NIR_feat_s, TIR_feat_s, quality_scores=quality_scores)
+                cls4t = self._agf_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
+                                      quality_scores, masks=mask)
             else:
-                cls4t = self._concat_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s, quality_scores)
+                cls4t = self._concat_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
+                                         quality_scores, masks=mask)
             if self.use_ocfr:
                 RGB_cls = RGB_feat_s[:, 0, :]
                 NIR_cls = NIR_feat_s[:, 0, :]
@@ -530,9 +566,11 @@ class HTLReID(nn.Module):
                                                                      quality_scores=quality_scores)
 
             if self.use_agf:
-                cls4t = self.AGF(RGB_feat_s, NIR_feat_s, TIR_feat_s, quality_scores=quality_scores)
+                cls4t = self._agf_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
+                                      quality_scores, masks=mask)
             else:
-                cls4t = self._concat_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s, quality_scores)
+                cls4t = self._concat_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
+                                         quality_scores, masks=mask)
             return self._test_descriptor(cls4t, RGB_feat_s, NIR_feat_s, TIR_feat_s,
                                          quality_scores, masks=mask)
 
@@ -576,9 +614,11 @@ class HTLReID(nn.Module):
 
             TIR_feat_s = torch.zeros_like(RGB_feat_s)
             if self.use_agf:
-                cls4t = self.AGF(RGB_feat_s, NIR_feat_s, TIR_feat_s, quality_scores=quality_scores)
+                cls4t = self._agf_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
+                                      quality_scores, masks=mask)
             else:
-                cls4t = self._concat_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s, quality_scores)
+                cls4t = self._concat_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
+                                         quality_scores, masks=mask)
             if self.use_ocfr:
                 RGB_cls = RGB_feat_s[:, 0, :]
                 NIR_cls = NIR_feat_s[:, 0, :]
@@ -626,9 +666,11 @@ class HTLReID(nn.Module):
 
             TIR_feat_s = torch.zeros_like(RGB_feat_s)
             if self.use_agf:
-                cls4t = self.AGF(RGB_feat_s, NIR_feat_s, TIR_feat_s, quality_scores=quality_scores)
+                cls4t = self._agf_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
+                                      quality_scores, masks=mask)
             else:
-                cls4t = self._concat_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s, quality_scores)
+                cls4t = self._concat_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
+                                         quality_scores, masks=mask)
             return self._test_descriptor(cls4t, RGB_feat_s, NIR_feat_s, TIR_feat_s,
                                          quality_scores, masks=mask)
 

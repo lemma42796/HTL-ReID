@@ -53,6 +53,7 @@ _C.MODEL.FACSS_MAX_K = 32
 _C.MODEL.FACSS_K_HIDDEN = 192
 _C.MODEL.FACSS_SOFT_RESIDUAL_WEIGHT = 0.15
 _C.MODEL.FACSS_ALPHA_HIDDEN = 192
+_C.MODEL.SELECTED_PATCH_BLEND_WEIGHT = 0.15
 # Pooling for cross-modal cosine: 'max' (paper) | 'topk' | 'lse'
 _C.MODEL.FACSS_CROSS_POOL = 'max'
 _C.MODEL.FACSS_CROSS_TOPK = 3
@@ -71,6 +72,9 @@ _C.MODEL.OCFR = 0
 _C.MODEL.AGF = 1
 # AGF (Adaptive Gated Fusion) hyperparameters
 _C.MODEL.AGF_NUM_HEADS = 12
+_C.MODEL.AGF_GATE_INIT_BIAS = -2.0
+_C.MODEL.AGF_RESIDUAL_WEIGHT = 0.35
+_C.MODEL.AGF_QUALITY_SCALE = 1
 # Nighttime modality reliability. The prior only initializes the quality head:
 # RGB is kept useful but starts slightly below NIR/TIR for night imagery.
 _C.MODEL.QUALITY_AWARE = 1
@@ -80,23 +84,23 @@ _C.MODEL.QUALITY_MIN_SCORE = 0.05
 # Lightweight modality adapters after the shared ViT backbone.
 _C.MODEL.MODALITY_ADAPTER = 1
 _C.MODEL.MODALITY_ADAPTER_DIM = 192
-_C.MODEL.MODALITY_ADAPTER_SCALE = 0.5
+_C.MODEL.MODALITY_ADAPTER_SCALE = 0.25
 # Local identity evidence from selected tokens.
 _C.MODEL.PART_BRANCH = 1
 _C.MODEL.PART_NUM = 3
 # Part pooling: 'stripe' keeps the fixed horizontal pooling; 'semantic' learns
 # selected-token part prototypes shared across modalities.
-_C.MODEL.PART_POOL = 'semantic'
+_C.MODEL.PART_POOL = 'stripe'
 # Auxiliary cross-modal constraints.
-_C.MODEL.ALIGN_LOSS_WEIGHT = 0.2
-_C.MODEL.TOKEN_CONSISTENCY_WEIGHT = 0.05
-_C.MODEL.GATE_BALANCE_WEIGHT = 0.01
-_C.MODEL.QUALITY_PERTURB_LOSS_WEIGHT = 0.05
+_C.MODEL.ALIGN_LOSS_WEIGHT = 0.05
+_C.MODEL.TOKEN_CONSISTENCY_WEIGHT = 0.01
+_C.MODEL.GATE_BALANCE_WEIGHT = 0.0
+_C.MODEL.QUALITY_PERTURB_LOSS_WEIGHT = 0.01
 _C.MODEL.FUSE_LOSS_WEIGHT = 1.0
 _C.MODEL.BRANCH_LOSS_WEIGHT = 0.5
-_C.MODEL.PART_LOSS_WEIGHT = 0.5
-_C.MODEL.AUX_LOSS_WEIGHT = 1.0
-_C.MODEL.AUX_WARMUP_EPOCHS = 20
+_C.MODEL.PART_LOSS_WEIGHT = 0.25
+_C.MODEL.AUX_LOSS_WEIGHT = 0.3
+_C.MODEL.AUX_WARMUP_EPOCHS = 40
 
 # Transformer setting
 _C.MODEL.DROP_PATH = 0.1
@@ -129,7 +133,7 @@ _C.INPUT.PIXEL_STD = [0.5, 0.5, 0.5]
 # Value of padding size
 _C.INPUT.PADDING = 10
 _C.INPUT.GRAY_REPLACE_PROB = 0.3
-_C.INPUT.MODALITY_DROP_PROB = 0.1
+_C.INPUT.MODALITY_DROP_PROB = 0.0
 
 # -----------------------------------------------------------------------------
 # Dataset
@@ -239,8 +243,8 @@ _C.TEST.NECK_FEAT = 'before'
 _C.TEST.FEAT_NORM = 'yes'
 # Optional test-time fusion with the trained part branch. 'concat' appends a
 # normalized part descriptor; set to 'off' to use the fused descriptor alone.
-_C.TEST.PART_FEAT = 'concat'
-_C.TEST.PART_FEAT_WEIGHT = 1.0
+_C.TEST.PART_FEAT = 'off'
+_C.TEST.PART_FEAT_WEIGHT = 0.3
 # ----------------------------------------------------------a------------------ #
 # Misc options
 # ---------------------------------------------------------------------------- #
