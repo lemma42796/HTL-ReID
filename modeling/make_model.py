@@ -188,7 +188,18 @@ class HTLReID(nn.Module):
             raise ValueError("TEST.PART_FEAT must be 'off', 'concat', or 'only'")
 
         self.selected_patch_blend_weight = float(cfg.MODEL.SELECTED_PATCH_BLEND_WEIGHT)
+        self.selected_patch_context = cfg.MODEL.SELECTED_PATCH_CONTEXT.lower()
+        if self.selected_patch_context not in ('mean', 'attn_gate'):
+            raise ValueError("MODEL.SELECTED_PATCH_CONTEXT must be 'mean' or 'attn_gate'")
+        self.selected_patch_attn_scale = float(cfg.MODEL.SELECTED_PATCH_ATTN_SCALE)
         self.agf_residual_weight = float(cfg.MODEL.AGF_RESIDUAL_WEIGHT)
+        if self.selected_patch_context == 'attn_gate':
+            self.SELECTED_CONTEXT_NORM = nn.LayerNorm(self.BACKBONE.token_dim)
+            self.SELECTED_CONTEXT_GATE = nn.Linear(2 * self.BACKBONE.token_dim,
+                                                   self.BACKBONE.token_dim)
+            nn.init.zeros_(self.SELECTED_CONTEXT_GATE.weight)
+            nn.init.constant_(self.SELECTED_CONTEXT_GATE.bias,
+                              float(cfg.MODEL.SELECTED_PATCH_GATE_INIT))
         if self.use_agf:
             self.AGF = AGF(dim=self.BACKBONE.token_dim,
                            num_heads=cfg.MODEL.AGF_NUM_HEADS,
@@ -256,19 +267,49 @@ class HTLReID(nn.Module):
             self.PART_HEAD = nn.Linear(part_dim, num_classes, bias=False)
             self.PART_HEAD.apply(weights_init_classifier)
 
+    @staticmethod
+    def _prepare_patch_mask(patches, mask=None):
+        if mask is None:
+            return None
+        valid = mask.to(device=patches.device, dtype=torch.bool).clone()
+        empty = ~valid.any(dim=1)
+        if empty.any():
+            valid[empty] = True
+        return valid
+
     def _pool_selected_patches(self, feat, mask=None):
         patches = feat[:, 1:, :]
-        if mask is None:
+        valid = self._prepare_patch_mask(patches, mask)
+        if valid is None:
             return patches.mean(dim=1)
-        mask = mask.to(device=patches.device, dtype=patches.dtype)
-        denom = mask.sum(dim=1, keepdim=True).clamp_min(1.0)
-        return (patches * mask.unsqueeze(-1)).sum(dim=1) / denom
+        weight = valid.to(dtype=patches.dtype)
+        denom = weight.sum(dim=1, keepdim=True).clamp_min(1.0)
+        return (patches * weight.unsqueeze(-1)).sum(dim=1) / denom
+
+    def _attend_selected_patches(self, cls_token, feat, mask=None):
+        patches = feat[:, 1:, :]
+        valid = self._prepare_patch_mask(patches, mask)
+        query = F.normalize(cls_token, dim=-1).unsqueeze(1)
+        key = F.normalize(patches, dim=-1)
+        logits = (query * key).sum(dim=-1) * self.selected_patch_attn_scale
+        if valid is not None:
+            logits = logits.masked_fill(~valid, torch.finfo(logits.dtype).min)
+        weights = F.softmax(logits, dim=1)
+        return (patches * weights.unsqueeze(-1)).sum(dim=1)
 
     def _cls_with_selected_context(self, feat, mask=None):
         cls_token = feat[:, 0, :]
         if self.selected_patch_blend_weight <= 0:
             return cls_token
         patch_context = self._pool_selected_patches(feat, mask)
+        if self.selected_patch_context == 'attn_gate':
+            attn_context = self._attend_selected_patches(cls_token, feat, mask)
+            patch_context = 0.5 * (patch_context + attn_context)
+            patch_context = self.SELECTED_CONTEXT_NORM(patch_context)
+            gate = torch.sigmoid(
+                self.SELECTED_CONTEXT_GATE(torch.cat([cls_token, patch_context], dim=-1))
+            )
+            patch_context = gate * patch_context
         return cls_token + self.selected_patch_blend_weight * patch_context
 
     def _concat_cls(self, rgb_feat, nir_feat, tir_feat, quality_scores=None, masks=None):
