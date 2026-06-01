@@ -158,6 +158,9 @@ _C.SOLVER = CN()
 _C.SOLVER.OPTIMIZER_NAME = "AdamW"
 # Number of max epoches
 _C.SOLVER.MAX_EPOCHS = 120
+# Optional early stop for diagnostic/ablation runs. A value <= 0 means train
+# through MAX_EPOCHS; the LR schedule still uses MAX_EPOCHS.
+_C.SOLVER.TRAIN_EPOCHS = 0
 # Base learning rate
 _C.SOLVER.BASE_LR = 0.0001
 _C.SOLVER.BACKBONE_LR_FACTOR = 0.1

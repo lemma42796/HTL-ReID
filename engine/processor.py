@@ -90,9 +90,14 @@ def do_train(cfg,
     eval_period = cfg.SOLVER.EVAL_PERIOD
     device = "cuda"
     epochs = cfg.SOLVER.MAX_EPOCHS
+    train_epochs = int(getattr(cfg.SOLVER, 'TRAIN_EPOCHS', 0))
+    run_epochs = train_epochs if train_epochs > 0 else epochs
     logging.getLogger().setLevel(logging.INFO)
     logger = logging.getLogger("HTL-ReID.train")
     logger.info('start training')
+    if run_epochs != epochs:
+        logger.info('diagnostic early stop enabled: training %d/%d scheduler epochs',
+                    run_epochs, epochs)
     # Create SummaryWriter
     writer = SummaryWriter(os.path.join(cfg.OUTPUT_DIR, 'runs'))
 
@@ -114,7 +119,7 @@ def do_train(cfg,
     updates_per_epoch = len(train_loader)
 
     best_index = {'mAP': 0, "Rank-1": 0, 'Rank-5': 0, 'Rank-10': 0}
-    for epoch in range(1, epochs + 1):
+    for epoch in range(1, run_epochs + 1):
         start_time = time.time()
         loss_meter.reset()
         evaluator_m.reset()
