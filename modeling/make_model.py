@@ -283,6 +283,7 @@ class HTLReID(nn.Module):
         self.selected_patch_attn_scale = float(cfg.MODEL.SELECTED_PATCH_ATTN_SCALE)
         self.use_selected_aggregation = bool(cfg.MODEL.SELECTED_AGGREGATION)
         self.agf_residual_weight = float(cfg.MODEL.AGF_RESIDUAL_WEIGHT)
+        self.agf_learnable_residual = bool(cfg.MODEL.AGF_LEARNABLE_RESIDUAL)
         self.agf_fusion_mode = cfg.MODEL.AGF_FUSION_MODE.lower()
         if self.agf_fusion_mode not in ('residual', 'agreement'):
             raise ValueError("MODEL.AGF_FUSION_MODE must be 'residual' or 'agreement'")
@@ -309,7 +310,15 @@ class HTLReID(nn.Module):
                            gate_init_bias=cfg.MODEL.AGF_GATE_INIT_BIAS,
                            quality_scale=bool(cfg.MODEL.AGF_QUALITY_SCALE),
                            mode=cfg.MODEL.AGF_MODE,
-                           tpm_steps=cfg.MODEL.AGF_TPM_STEPS)
+                           tpm_steps=cfg.MODEL.AGF_TPM_STEPS,
+                           use_masks=bool(cfg.MODEL.AGF_USE_MASKS))
+            if self.agf_learnable_residual:
+                max_weight = max(float(self.agf_residual_weight), 1e-4)
+                init_weight = min(max(float(cfg.MODEL.AGF_RESIDUAL_INIT), 1e-6),
+                                  max_weight * 0.999)
+                init_ratio = init_weight / max_weight
+                init_logit = torch.logit(torch.tensor(init_ratio))
+                self.AGF_RESIDUAL_LOGIT = nn.Parameter(init_logit)
         if self.use_adapter:
             self.MODALITY_ADAPTERS = nn.ModuleDict({
                 'RGB': ModalityAdapter(self.BACKBONE.token_dim,
@@ -445,8 +454,12 @@ class HTLReID(nn.Module):
         base_cls = self._concat_cls(rgb_feat, nir_feat, tir_feat,
                                     quality_scores, masks=masks)
         agf_cls = self.AGF(rgb_feat, nir_feat, tir_feat,
-                           quality_scores=quality_scores)
-        weight = max(0.0, min(1.0, self.agf_residual_weight))
+                           quality_scores=quality_scores, masks=masks)
+        max_weight = max(0.0, min(1.0, self.agf_residual_weight))
+        if self.agf_learnable_residual:
+            weight = max_weight * torch.sigmoid(self.AGF_RESIDUAL_LOGIT)
+        else:
+            weight = max_weight
         if self.agf_fusion_mode == 'residual':
             return base_cls + weight * (agf_cls - base_cls)
 

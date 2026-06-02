@@ -20,12 +20,30 @@ class CrossAttention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x, y):
+    @staticmethod
+    def _valid_mask(mask, batch_size, num_tokens, device):
+        if mask is None:
+            return None
+        valid = mask.to(device=device, dtype=torch.bool).clone()
+        if valid.size(1) != num_tokens:
+            raise ValueError('AGF attention mask length does not match patch tokens')
+        empty = ~valid.any(dim=1)
+        if empty.any():
+            valid[empty] = True
+        return valid
+
+    def forward(self, x, y, mask=None):
         B, N, C = y.shape
         q = self.q_(x).reshape(B, 1, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
         k = self.k_(self.normy(y)).reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
         v = self.v_(y).reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
         attn = (q @ k.transpose(-2, -1)) * self.scale
+        valid = self._valid_mask(mask, B, N, y.device)
+        if valid is not None:
+            attn = attn.masked_fill(
+                ~valid[:, None, None, :],
+                torch.finfo(attn.dtype).min,
+            )
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
         x = (attn @ v).transpose(1, 2)
@@ -74,8 +92,8 @@ class GatedCrossAttn(nn.Module):
         if self.mlp.fc2.bias is not None:
             nn.init.zeros_(self.mlp.fc2.bias)
 
-    def forward(self, x, y):
-        delta = self.attn(self.norm1(x), y)
+    def forward(self, x, y, mask=None):
+        delta = self.attn(self.norm1(x), y, mask=mask)
         lam = torch.sigmoid(self.gate(torch.cat([x, delta], dim=-1)))
         x = (1.0 - lam) * x + lam * delta
         x = x + self.drop_path(self.mlp(self.norm2(x)))
@@ -94,9 +112,10 @@ class AGF(nn.Module):
     """
 
     def __init__(self, dim, num_heads, gate_init_bias=-2.0, quality_scale=True,
-                 mode='graph', tpm_steps=3):
+                 mode='graph', tpm_steps=3, use_masks=True):
         super().__init__()
         self.quality_scale = bool(quality_scale)
+        self.use_masks = bool(use_masks)
         self.mode = mode.lower()
         if self.mode not in ('graph', 'tpm_lite'):
             raise ValueError("MODEL.AGF_MODE must be 'graph' or 'tpm_lite'")
@@ -206,7 +225,16 @@ class AGF(nn.Module):
             scale = (q_t > 0).to(fused.dtype)
         return fused * scale.unsqueeze(-1)
 
-    def _tpm_lite(self, feats, cls_tokens, quality):
+    @staticmethod
+    def _mask_tuple(masks):
+        if masks is None:
+            return (None, None, None)
+        if len(masks) == 2:
+            return (masks[0], masks[1], None)
+        return masks
+
+    def _tpm_lite(self, feats, cls_tokens, quality, masks=None):
+        masks = self._mask_tuple(masks)
         cls_tokens = list(cls_tokens)
         for step, block in enumerate(self.tpm_blocks):
             source_indices = [
@@ -215,7 +243,9 @@ class AGF(nn.Module):
             ]
             next_cls = []
             for target_idx, src_idx in enumerate(source_indices):
-                candidate = block(cls_tokens[target_idx], feats[src_idx][:, 1:, :])
+                src_mask = masks[src_idx] if self.use_masks else None
+                candidate = block(cls_tokens[target_idx], feats[src_idx][:, 1:, :],
+                                  mask=src_mask)
                 src_quality = quality[:, src_idx:src_idx + 1]
                 next_cls.append(
                     cls_tokens[target_idx] +
@@ -230,12 +260,12 @@ class AGF(nn.Module):
             ]
         return torch.cat(cls_tokens, dim=-1)
 
-    def forward(self, x, y, z, quality_scores=None):
+    def forward(self, x, y, z, quality_scores=None, masks=None):
         feats = [x, y, z]
         cls_tokens = [feat[:, 0, :] for feat in feats]
         quality = self._quality_tensor(x, quality_scores)
         if self.mode == 'tpm_lite':
-            return self._tpm_lite(feats, cls_tokens, quality)
+            return self._tpm_lite(feats, cls_tokens, quality, masks=masks)
         fused = [
             self._fuse_node(feats, cls_tokens, quality, target_idx=i)
             for i in range(3)
