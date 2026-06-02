@@ -268,6 +268,7 @@ class HTLReID(nn.Module):
         self.modality_drop_prob = float(cfg.INPUT.MODALITY_DROP_PROB)
         self.align_loss_weight = float(cfg.MODEL.ALIGN_LOSS_WEIGHT)
         self.token_consistency_weight = float(cfg.MODEL.TOKEN_CONSISTENCY_WEIGHT)
+        self.bcc_loss_weight = float(cfg.MODEL.BCC_LOSS_WEIGHT)
         self.gate_balance_weight = float(cfg.MODEL.GATE_BALANCE_WEIGHT)
         self.quality_perturb_loss_weight = float(cfg.MODEL.QUALITY_PERTURB_LOSS_WEIGHT)
         self.quality_min_score = float(cfg.MODEL.QUALITY_MIN_SCORE)
@@ -642,6 +643,31 @@ class HTLReID(nn.Module):
                 token_loss = token_loss + (weight * (1.0 - inter / union)).mean()
             loss = loss + self.token_consistency_weight * token_loss / max(len(valid_pairs), 1)
 
+        if self.bcc_loss_weight > 0 and masks is not None:
+            bcc = torch.zeros_like(loss)
+            patches = [rgb_feat[:, 1:, :], nir_feat[:, 1:, :], tir_feat[:, 1:, :]]
+            masks_full = masks
+            if len(masks_full) == 2:
+                masks_full = (masks_full[0], masks_full[1], None)
+            pair_count = 0
+            for i, j in valid_pairs:
+                if masks_full[i] is None or masks_full[j] is None:
+                    continue
+                bg_mask = ~(masks_full[i].bool() | masks_full[j].bool())
+                if not bg_mask.any():
+                    continue
+                pi = F.normalize(patches[i], dim=-1)
+                pj = F.normalize(patches[j], dim=-1)
+                diff = (pi - pj).pow(2).sum(dim=-1)
+                bg = bg_mask.to(diff.dtype)
+                denom = bg.sum(dim=1).clamp_min(1.0)
+                per_sample = (diff * bg).sum(dim=1) / denom
+                weight = quality_scores[:, i] * quality_scores[:, j]
+                bcc = bcc + (weight * per_sample).mean()
+                pair_count += 1
+            if pair_count > 0:
+                loss = loss + self.bcc_loss_weight * bcc / pair_count
+
         if self.gate_balance_weight > 0:
             active = torch.tensor([1.0, 1.0, 1.0 if has_tir else 0.0],
                                   device=rgb_feat.device, dtype=quality_scores.dtype).view(1, 3)
@@ -742,7 +768,7 @@ class HTLReID(nn.Module):
             else:
                 loss_aux = torch.zeros((), device=RGB_feat.device)
             loss_aux = loss_aux + self._auxiliary_losses(
-                RGB_feat_s, NIR_feat_s, TIR_feat_s, mask, quality_scores, has_tir=True)
+                RGB_feat, NIR_feat, TIR_feat, mask, quality_scores, has_tir=True)
             loss_aux = loss_aux + self._quality_dropout_loss(quality_scores, keep_mask)
             score = self.FUSE_HEAD(self.FUSE_BN(cls4t))
             agf_aux_pairs = self._agf_aux_pairs()
@@ -850,7 +876,7 @@ class HTLReID(nn.Module):
             else:
                 loss_aux = torch.zeros((), device=RGB_feat.device)
             loss_aux = loss_aux + self._auxiliary_losses(
-                RGB_feat_s, NIR_feat_s, TIR_feat_s, mask, quality_scores, has_tir=False)
+                RGB_feat, NIR_feat, TIR_feat_s, mask, quality_scores, has_tir=False)
             loss_aux = loss_aux + self._quality_dropout_loss(quality_scores, keep_mask)
             score = self.FUSE_HEAD(self.FUSE_BN(cls4t))
             agf_aux_pairs = self._agf_aux_pairs()

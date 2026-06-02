@@ -118,6 +118,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--python", default="/root/miniconda3/bin/python")
     parser.add_argument("--output-root", default="")
+    parser.add_argument("--rows", default="",
+                        help="Comma-separated row ids or names to run, e.g. A1,A3")
     args = parser.parse_args()
 
     if args.output_root:
@@ -128,8 +130,21 @@ def main():
     root.mkdir(parents=True, exist_ok=True)
     summary_path = root / "summary.csv"
     rows = []
+    selected_rows = ROWS
+    if args.rows:
+        requested = {item.strip().lower() for item in args.rows.split(",") if item.strip()}
+        selected_rows = [
+            row for row in ROWS
+            if row[0].lower() in requested or row[1].lower() in requested
+        ]
+        if not selected_rows:
+            root.joinpath("FAILED").write_text(
+                f"no rows matched --rows {args.rows!r}\n",
+                encoding="utf-8",
+            )
+            return 2
 
-    for row_id, name, config_path in ROWS:
+    for row_id, name, config_path in selected_rows:
         result = run_row(args, root, row_id, name, config_path)
         rows.append(result)
         write_summary(summary_path, rows)
@@ -140,7 +155,7 @@ def main():
             )
             return result["returncode"]
 
-    (root / "DONE").write_text("all rows finished\n", encoding="utf-8")
+    (root / "DONE").write_text("selected rows finished\n", encoding="utf-8")
     return 0
 
 
