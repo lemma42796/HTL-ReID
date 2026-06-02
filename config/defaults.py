@@ -69,6 +69,12 @@ _C.MODEL.FACSS_NORM = 'minmax'
 # forward is identical to hard top-K, backward routes through softmax of scores.
 _C.MODEL.FACSS_STE = 1
 _C.MODEL.FACSS_STE_TAU = 1.0
+# Align selected patch indices across modalities. Inspired by EDITOR/Magic
+# Tokens, the final selected mask is the union of RGB/NIR/TIR selections.
+_C.MODEL.FACSS_MODALITY_UNION = 1
+# When another modality selects a patch, keep the same patch in this modality
+# too instead of pooling over a modality-specific mask only.
+_C.MODEL.FACSS_UNION_PROMOTE = 1
 # OCFR auxiliary loss (not in paper); off by default for paper-faithful reproduction
 _C.MODEL.OCFR = 0
 # Ablation switches (1=enable, 0=disable)
