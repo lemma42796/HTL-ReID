@@ -86,37 +86,57 @@ class AGF(nn.Module):
     """
     Quality-aware graph fusion for nighttime RGB/NIR/TIR ReID.
 
-    Each modality is a graph node. For every target node, a shared gated
-    cross-attention reads both other modalities, while a small edge gate and
-    the per-modality quality scores determine which neighbor should dominate.
+    The default graph mode keeps the original adaptive neighbor fusion. TPM-lite
+    replaces the free neighbor choice with fixed cyclic token permutation:
+    RGB cls reads NIR patches, NIR cls reads TIR patches, and TIR cls reads
+    RGB patches, then the source is rotated in the following steps.
     The final [B, 3D] descriptor preserves the original AGF output contract.
     """
 
-    def __init__(self, dim, num_heads, gate_init_bias=-2.0, quality_scale=True):
+    def __init__(self, dim, num_heads, gate_init_bias=-2.0, quality_scale=True,
+                 mode='graph', tpm_steps=3):
         super().__init__()
         self.quality_scale = bool(quality_scale)
-        self.cross = GatedCrossAttn(dim, num_heads, mlp_ratio=4., qkv_bias=False,
-                                    qk_scale=None, drop=0., attn_drop=0.,
-                                    drop_path=0., act_layer=nn.GELU,
-                                    norm_layer=nn.LayerNorm,
-                                    gate_init_bias=gate_init_bias)
-        self.self_aggr = GatedCrossAttn(dim, num_heads, mlp_ratio=4., qkv_bias=False,
+        self.mode = mode.lower()
+        if self.mode not in ('graph', 'tpm_lite'):
+            raise ValueError("MODEL.AGF_MODE must be 'graph' or 'tpm_lite'")
+        self.tpm_steps = max(1, int(tpm_steps))
+        if self.mode == 'tpm_lite':
+            self.tpm_blocks = nn.ModuleList([
+                GatedCrossAttn(dim, num_heads, mlp_ratio=4., qkv_bias=False,
+                               qk_scale=None, drop=0., attn_drop=0.,
+                               drop_path=0., act_layer=nn.GELU,
+                               norm_layer=nn.LayerNorm,
+                               gate_init_bias=gate_init_bias)
+                for _ in range(self.tpm_steps)
+            ])
+        else:
+            self.cross = GatedCrossAttn(dim, num_heads, mlp_ratio=4., qkv_bias=False,
                                         qk_scale=None, drop=0., attn_drop=0.,
                                         drop_path=0., act_layer=nn.GELU,
                                         norm_layer=nn.LayerNorm,
                                         gate_init_bias=gate_init_bias)
-        hidden = max(dim // 4, 64)
-        self.edge_gate = nn.Sequential(
-            nn.LayerNorm(2 * dim + 2),
-            nn.Linear(2 * dim + 2, hidden),
-            nn.GELU(),
-            nn.Linear(hidden, 1),
-        )
+            self.self_aggr = GatedCrossAttn(dim, num_heads, mlp_ratio=4., qkv_bias=False,
+                                            qk_scale=None, drop=0., attn_drop=0.,
+                                            drop_path=0., act_layer=nn.GELU,
+                                            norm_layer=nn.LayerNorm,
+                                            gate_init_bias=gate_init_bias)
+            hidden = max(dim // 4, 64)
+            self.edge_gate = nn.Sequential(
+                nn.LayerNorm(2 * dim + 2),
+                nn.Linear(2 * dim + 2, hidden),
+                nn.GELU(),
+                nn.Linear(hidden, 1),
+            )
         self.apply(self._init_weights)
-        self.cross.reset_gate(gate_init_bias)
-        self.self_aggr.reset_gate(gate_init_bias)
-        nn.init.zeros_(self.edge_gate[-1].weight)
-        nn.init.zeros_(self.edge_gate[-1].bias)
+        if self.mode == 'tpm_lite':
+            for block in self.tpm_blocks:
+                block.reset_gate(gate_init_bias)
+        else:
+            self.cross.reset_gate(gate_init_bias)
+            self.self_aggr.reset_gate(gate_init_bias)
+            nn.init.zeros_(self.edge_gate[-1].weight)
+            nn.init.zeros_(self.edge_gate[-1].bias)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -186,10 +206,36 @@ class AGF(nn.Module):
             scale = (q_t > 0).to(fused.dtype)
         return fused * scale.unsqueeze(-1)
 
+    def _tpm_lite(self, feats, cls_tokens, quality):
+        cls_tokens = list(cls_tokens)
+        for step, block in enumerate(self.tpm_blocks):
+            source_indices = [
+                (target_idx + step + 1) % 3
+                for target_idx in range(3)
+            ]
+            next_cls = []
+            for target_idx, src_idx in enumerate(source_indices):
+                candidate = block(cls_tokens[target_idx], feats[src_idx][:, 1:, :])
+                src_quality = quality[:, src_idx:src_idx + 1]
+                next_cls.append(
+                    cls_tokens[target_idx] +
+                    src_quality * (candidate - cls_tokens[target_idx])
+                )
+            cls_tokens = next_cls
+
+        if self.quality_scale:
+            cls_tokens = [
+                cls_tokens[i] * quality[:, i:i + 1]
+                for i in range(3)
+            ]
+        return torch.cat(cls_tokens, dim=-1)
+
     def forward(self, x, y, z, quality_scores=None):
         feats = [x, y, z]
         cls_tokens = [feat[:, 0, :] for feat in feats]
         quality = self._quality_tensor(x, quality_scores)
+        if self.mode == 'tpm_lite':
+            return self._tpm_lite(feats, cls_tokens, quality)
         fused = [
             self._fuse_node(feats, cls_tokens, quality, target_idx=i)
             for i in range(3)

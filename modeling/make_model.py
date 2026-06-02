@@ -283,6 +283,12 @@ class HTLReID(nn.Module):
         self.selected_patch_attn_scale = float(cfg.MODEL.SELECTED_PATCH_ATTN_SCALE)
         self.use_selected_aggregation = bool(cfg.MODEL.SELECTED_AGGREGATION)
         self.agf_residual_weight = float(cfg.MODEL.AGF_RESIDUAL_WEIGHT)
+        self.agf_fusion_mode = cfg.MODEL.AGF_FUSION_MODE.lower()
+        if self.agf_fusion_mode not in ('residual', 'agreement'):
+            raise ValueError("MODEL.AGF_FUSION_MODE must be 'residual' or 'agreement'")
+        self.agf_agree_min = float(cfg.MODEL.AGF_AGREE_MIN)
+        self.agf_agree_temp = float(cfg.MODEL.AGF_AGREE_TEMP)
+        self.agf_norm_cap = float(cfg.MODEL.AGF_NORM_CAP)
         if self.selected_patch_context == 'attn_gate':
             self.SELECTED_CONTEXT_NORM = nn.LayerNorm(self.BACKBONE.token_dim)
             self.SELECTED_CONTEXT_GATE = nn.Linear(2 * self.BACKBONE.token_dim,
@@ -301,7 +307,9 @@ class HTLReID(nn.Module):
             self.AGF = AGF(dim=self.BACKBONE.token_dim,
                            num_heads=cfg.MODEL.AGF_NUM_HEADS,
                            gate_init_bias=cfg.MODEL.AGF_GATE_INIT_BIAS,
-                           quality_scale=bool(cfg.MODEL.AGF_QUALITY_SCALE))
+                           quality_scale=bool(cfg.MODEL.AGF_QUALITY_SCALE),
+                           mode=cfg.MODEL.AGF_MODE,
+                           tpm_steps=cfg.MODEL.AGF_TPM_STEPS)
         if self.use_adapter:
             self.MODALITY_ADAPTERS = nn.ModuleDict({
                 'RGB': ModalityAdapter(self.BACKBONE.token_dim,
@@ -439,7 +447,26 @@ class HTLReID(nn.Module):
         agf_cls = self.AGF(rgb_feat, nir_feat, tir_feat,
                            quality_scores=quality_scores)
         weight = max(0.0, min(1.0, self.agf_residual_weight))
-        return base_cls + weight * (agf_cls - base_cls)
+        if self.agf_fusion_mode == 'residual':
+            return base_cls + weight * (agf_cls - base_cls)
+
+        base_nodes = base_cls.chunk(3, dim=-1)
+        agf_nodes = agf_cls.chunk(3, dim=-1)
+        fused_nodes = []
+        for idx, (base_node, agf_node) in enumerate(zip(base_nodes, agf_nodes)):
+            delta = agf_node - base_node
+            if self.agf_norm_cap > 0:
+                base_norm = base_node.norm(dim=-1, keepdim=True).clamp_min(1e-6)
+                delta_norm = delta.norm(dim=-1, keepdim=True).clamp_min(1e-6)
+                max_delta = base_norm * self.agf_norm_cap
+                delta = delta * (max_delta / delta_norm).clamp(max=1.0)
+
+            agree = F.cosine_similarity(base_node, agf_node, dim=-1, eps=1e-6)
+            gate = torch.sigmoid(
+                (agree - self.agf_agree_min) * self.agf_agree_temp
+            ).unsqueeze(-1)
+            fused_nodes.append(base_node + weight * gate * delta)
+        return torch.cat(fused_nodes, dim=-1)
 
     def _apply_modality_dropout(self, rgb, nir, tir=None, return_keep=False):
         if (not self.training) or self.modality_drop_prob <= 0:

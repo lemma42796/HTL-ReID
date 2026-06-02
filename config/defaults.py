@@ -85,9 +85,15 @@ _C.MODEL.OCFR = 0
 _C.MODEL.AGF = 1
 # AGF (Adaptive Gated Fusion) hyperparameters
 _C.MODEL.AGF_NUM_HEADS = 12
+_C.MODEL.AGF_MODE = 'graph'
+_C.MODEL.AGF_TPM_STEPS = 3
 _C.MODEL.AGF_GATE_INIT_BIAS = -2.0
 _C.MODEL.AGF_RESIDUAL_WEIGHT = 0.35
 _C.MODEL.AGF_QUALITY_SCALE = 1
+_C.MODEL.AGF_FUSION_MODE = 'residual'
+_C.MODEL.AGF_AGREE_MIN = 0.15
+_C.MODEL.AGF_AGREE_TEMP = 10.0
+_C.MODEL.AGF_NORM_CAP = 0.35
 # Nighttime modality reliability. The prior only initializes the quality head:
 # RGB is kept useful but starts slightly below NIR/TIR for night imagery.
 _C.MODEL.QUALITY_AWARE = 1
