@@ -84,6 +84,95 @@ class ModalityAdapter(nn.Module):
         return x + self.scale * self.adapter(x)
 
 
+class SelectedTokenAggregator(nn.Module):
+    """HMA-like masked aggregation over selected patch tokens."""
+
+    def __init__(self, dim, num_heads, gate_init_bias=-2.0, residual_weight=0.5):
+        super().__init__()
+        self.residual_weight = float(residual_weight)
+        self.query_norm = nn.LayerNorm(dim)
+        self.self_kv_norm = nn.LayerNorm(dim)
+        self.cross_kv_norm = nn.LayerNorm(dim)
+        self.context_norm = nn.LayerNorm(dim)
+        self.self_attn = nn.MultiheadAttention(
+            dim, num_heads, dropout=0.0, batch_first=True)
+        self.cross_attn = nn.MultiheadAttention(
+            dim, num_heads, dropout=0.0, batch_first=True)
+        self.gate = nn.Linear(2 * dim, dim)
+        nn.init.zeros_(self.gate.weight)
+        nn.init.constant_(self.gate.bias, float(gate_init_bias))
+
+    @staticmethod
+    def _prepare_tokens(feat, mask=None):
+        patches = feat[:, 1:, :]
+        if mask is None:
+            valid = torch.ones(
+                patches.shape[:2], device=patches.device, dtype=torch.bool)
+        else:
+            valid = mask.to(device=patches.device, dtype=torch.bool).clone()
+            empty = ~valid.any(dim=1)
+            if empty.any():
+                valid[empty] = True
+        return patches, ~valid
+
+    def _attend(self, attn, kv_norm, query, tokens, key_padding_mask):
+        q = self.query_norm(query).unsqueeze(1)
+        kv = kv_norm(tokens)
+        context, _ = attn(
+            q, kv, tokens, key_padding_mask=key_padding_mask,
+            need_weights=False)
+        return context.squeeze(1)
+
+    def forward(self, feats, masks=None, active=None, base_cls=None):
+        masks = masks or (None, None, None)
+        if len(masks) == 2:
+            masks = (masks[0], masks[1], None)
+        active = active or (True, True, True)
+        base_cls = base_cls or [feat[:, 0, :] for feat in feats]
+
+        prepared = [
+            self._prepare_tokens(feat, mask)
+            for feat, mask in zip(feats, masks)
+        ]
+
+        fused = []
+        for target_idx, is_active in enumerate(active):
+            base = base_cls[target_idx]
+            if not is_active:
+                fused.append(torch.zeros_like(base))
+                continue
+
+            own_tokens, own_padding = prepared[target_idx]
+            self_ctx = self._attend(
+                self.self_attn, self.self_kv_norm, base,
+                own_tokens, own_padding)
+
+            cross_tokens = []
+            cross_padding = []
+            for src_idx, src_active in enumerate(active):
+                if src_idx == target_idx or not src_active:
+                    continue
+                tokens, padding = prepared[src_idx]
+                cross_tokens.append(tokens)
+                cross_padding.append(padding)
+
+            if cross_tokens:
+                tokens = torch.cat(cross_tokens, dim=1)
+                padding = torch.cat(cross_padding, dim=1)
+                cross_ctx = self._attend(
+                    self.cross_attn, self.cross_kv_norm, base,
+                    tokens, padding)
+                context = 0.5 * (self_ctx + cross_ctx)
+            else:
+                context = self_ctx
+
+            context = self.context_norm(context)
+            gate = torch.sigmoid(self.gate(torch.cat([base, context], dim=-1)))
+            fused.append(base + self.residual_weight * gate * context)
+
+        return fused
+
+
 class build_transformer(nn.Module):
     def __init__(self, num_classes, cfg, camera_num, factory):
         super(build_transformer, self).__init__()
@@ -192,6 +281,7 @@ class HTLReID(nn.Module):
         if self.selected_patch_context not in ('mean', 'attn_gate'):
             raise ValueError("MODEL.SELECTED_PATCH_CONTEXT must be 'mean' or 'attn_gate'")
         self.selected_patch_attn_scale = float(cfg.MODEL.SELECTED_PATCH_ATTN_SCALE)
+        self.use_selected_aggregation = bool(cfg.MODEL.SELECTED_AGGREGATION)
         self.agf_residual_weight = float(cfg.MODEL.AGF_RESIDUAL_WEIGHT)
         if self.selected_patch_context == 'attn_gate':
             self.SELECTED_CONTEXT_NORM = nn.LayerNorm(self.BACKBONE.token_dim)
@@ -200,6 +290,13 @@ class HTLReID(nn.Module):
             nn.init.zeros_(self.SELECTED_CONTEXT_GATE.weight)
             nn.init.constant_(self.SELECTED_CONTEXT_GATE.bias,
                               float(cfg.MODEL.SELECTED_PATCH_GATE_INIT))
+        if self.use_selected_aggregation:
+            self.SELECTED_AGGREGATOR = SelectedTokenAggregator(
+                dim=self.BACKBONE.token_dim,
+                num_heads=cfg.MODEL.SELECTED_AGG_NUM_HEADS,
+                gate_init_bias=cfg.MODEL.SELECTED_AGG_GATE_INIT_BIAS,
+                residual_weight=cfg.MODEL.SELECTED_AGG_RESIDUAL_WEIGHT,
+            )
         if self.use_agf:
             self.AGF = AGF(dim=self.BACKBONE.token_dim,
                            num_heads=cfg.MODEL.AGF_NUM_HEADS,
@@ -314,6 +411,7 @@ class HTLReID(nn.Module):
 
     def _concat_cls(self, rgb_feat, nir_feat, tir_feat, quality_scores=None, masks=None):
         masks = masks or (None, None, None)
+        has_tir = len(masks) != 2 and tir_feat is not None
         if len(masks) == 2:
             masks = (masks[0], masks[1], None)
         cls_list = [
@@ -321,6 +419,13 @@ class HTLReID(nn.Module):
             self._cls_with_selected_context(nir_feat, masks[1]),
             self._cls_with_selected_context(tir_feat, masks[2]),
         ]
+        if self.use_selected_aggregation:
+            cls_list = self.SELECTED_AGGREGATOR(
+                (rgb_feat, nir_feat, tir_feat),
+                masks=masks,
+                active=(True, True, has_tir),
+                base_cls=cls_list,
+            )
         if quality_scores is not None:
             cls_list = [
                 cls_list[i] * quality_scores[:, i:i + 1]
