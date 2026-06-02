@@ -14,9 +14,6 @@ and auxiliary-loss switches for ablation and follow-up research. The latest
 internal chain20 checks did not show a stable mAP gain from A3 over A2, so those
 branches should be treated as exploratory unless they are revalidated.
 
-See `docs/rgbnt201_chain20_ablation_status.md` for the current RGBNT201
-ablation decision record.
-
 ## Overview
 
 HTL-ReID is a unified framework for nighttime multi-modal (RGB / NIR / TIR) object re-identification. The current evidence-backed implementation extends the original HTL design into a quality-aware token selection and fusion pipeline:
