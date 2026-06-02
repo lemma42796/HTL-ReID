@@ -70,6 +70,9 @@ if __name__ == '__main__':
         cfg)
     print("data is ready")
     model = make_model(cfg, num_class=num_classes, camera_num=camera_num)
+    if cfg.MODEL.RESUME_PATH:
+        logger.info("Loading resume checkpoint from {}".format(cfg.MODEL.RESUME_PATH))
+        model.load_param(cfg.MODEL.RESUME_PATH)
 
     loss_func, center_criterion = make_loss(cfg, num_classes=num_classes)
 

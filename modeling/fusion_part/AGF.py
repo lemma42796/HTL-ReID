@@ -100,6 +100,55 @@ class GatedCrossAttn(nn.Module):
         return x
 
 
+class ResidualCrossAttn(nn.Module):
+    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None,
+                 drop=0., attn_drop=0., drop_path=0.,
+                 act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
+        self.attn = CrossAttention(
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
+            attn_drop=attn_drop, proj_drop=drop)
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.norm2 = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim,
+                       act_layer=act_layer, drop=drop)
+
+    def forward(self, x, y, mask=None):
+        x = x + self.drop_path(self.attn(self.norm1(x), y, mask=mask))
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x
+
+
+class BlockRotation(nn.Module):
+    def __init__(self, dim, num_heads, mode=0):
+        super().__init__()
+        self.rotation = ResidualCrossAttn(dim, num_heads, mlp_ratio=4.,
+                                          qkv_bias=False, qk_scale=None,
+                                          drop=0., attn_drop=0.,
+                                          drop_path=0., act_layer=nn.GELU,
+                                          norm_layer=nn.LayerNorm)
+        self.mode = int(mode)
+
+    def forward(self, x, y, z, masks=None):
+        if masks is None:
+            masks = (None, None, None)
+        mask_x, mask_y, mask_z = masks
+        if self.mode == 0:
+            x_cls = self.rotation(x[:, 0, :], y[:, 1:, :], mask=mask_y)
+            y_cls = self.rotation(y[:, 0, :], z[:, 1:, :], mask=mask_z)
+            z_cls = self.rotation(z[:, 0, :], x[:, 1:, :], mask=mask_x)
+            x = torch.cat([x_cls.unsqueeze(1), x[:, 1:, :]], dim=1)
+            y = torch.cat([y_cls.unsqueeze(1), y[:, 1:, :]], dim=1)
+            z = torch.cat([z_cls.unsqueeze(1), z[:, 1:, :]], dim=1)
+            return x, y, z
+        x_cls = self.rotation(x[:, 0, :], x[:, 1:, :], mask=mask_x)
+        y_cls = self.rotation(y[:, 0, :], y[:, 1:, :], mask=mask_y)
+        z_cls = self.rotation(z[:, 0, :], z[:, 1:, :], mask=mask_z)
+        return torch.cat([x_cls, y_cls, z_cls], dim=-1)
+
+
 class AGF(nn.Module):
     """
     Quality-aware graph fusion for nighttime RGB/NIR/TIR ReID.
@@ -108,6 +157,8 @@ class AGF(nn.Module):
     replaces the free neighbor choice with fixed cyclic token permutation:
     RGB cls reads NIR patches, NIR cls reads TIR patches, and TIR cls reads
     RGB patches, then the source is rotated in the following steps.
+    TPM mode follows TOP-ReID's residual rotation block more closely and is
+    intended as an independent auxiliary descriptor branch.
     The final [B, 3D] descriptor preserves the original AGF output contract.
     """
 
@@ -117,8 +168,8 @@ class AGF(nn.Module):
         self.quality_scale = bool(quality_scale)
         self.use_masks = bool(use_masks)
         self.mode = mode.lower()
-        if self.mode not in ('graph', 'tpm_lite'):
-            raise ValueError("MODEL.AGF_MODE must be 'graph' or 'tpm_lite'")
+        if self.mode not in ('graph', 'tpm_lite', 'tpm'):
+            raise ValueError("MODEL.AGF_MODE must be 'graph', 'tpm_lite', or 'tpm'")
         self.tpm_steps = max(1, int(tpm_steps))
         if self.mode == 'tpm_lite':
             self.tpm_blocks = nn.ModuleList([
@@ -129,6 +180,10 @@ class AGF(nn.Module):
                                gate_init_bias=gate_init_bias)
                 for _ in range(self.tpm_steps)
             ])
+        elif self.mode == 'tpm':
+            self.tpm_start = BlockRotation(dim, num_heads, mode=0)
+            self.tpm_middle = BlockRotation(dim, num_heads, mode=0)
+            self.tpm_end = BlockRotation(dim, num_heads, mode=1)
         else:
             self.cross = GatedCrossAttn(dim, num_heads, mlp_ratio=4., qkv_bias=False,
                                         qk_scale=None, drop=0., attn_drop=0.,
@@ -151,7 +206,7 @@ class AGF(nn.Module):
         if self.mode == 'tpm_lite':
             for block in self.tpm_blocks:
                 block.reset_gate(gate_init_bias)
-        else:
+        elif self.mode == 'graph':
             self.cross.reset_gate(gate_init_bias)
             self.self_aggr.reset_gate(gate_init_bias)
             nn.init.zeros_(self.edge_gate[-1].weight)
@@ -260,12 +315,30 @@ class AGF(nn.Module):
             ]
         return torch.cat(cls_tokens, dim=-1)
 
+    def _tpm(self, feats, quality, masks=None):
+        masks = self._mask_tuple(masks)
+        if not self.use_masks:
+            masks = (None, None, None)
+        x, y, z = feats
+        x, y, z = self.tpm_start(x, y, z, masks=masks)
+        x, z, y = self.tpm_middle(x, z, y, masks=(masks[0], masks[2], masks[1]))
+        cls = self.tpm_end(x, y, z, masks=masks)
+        if self.quality_scale:
+            cls_nodes = cls.chunk(3, dim=-1)
+            cls = torch.cat([
+                cls_nodes[i] * quality[:, i:i + 1]
+                for i in range(3)
+            ], dim=-1)
+        return cls
+
     def forward(self, x, y, z, quality_scores=None, masks=None):
         feats = [x, y, z]
         cls_tokens = [feat[:, 0, :] for feat in feats]
         quality = self._quality_tensor(x, quality_scores)
         if self.mode == 'tpm_lite':
             return self._tpm_lite(feats, cls_tokens, quality, masks=masks)
+        if self.mode == 'tpm':
+            return self._tpm(feats, quality, masks=masks)
         fused = [
             self._fuse_node(feats, cls_tokens, quality, target_idx=i)
             for i in range(3)

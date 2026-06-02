@@ -18,6 +18,8 @@ _C.MODEL.PRETRAIN_PATH_T = '/root/autodl-tmp/pretrained/vit_base_patch16_224_aug
 # Use ImageNet pretrained model to initialize backbone or use self trained model to initialize the whole model
 # Options: 'imagenet' or 'self'
 _C.MODEL.PRETRAIN_CHOICE = 'imagenet'
+# Optional full-model checkpoint to partially load before training.
+_C.MODEL.RESUME_PATH = ''
 # Choose different resnet backbone (1->resnet50||2->resnet101||3->resnet152)
 # Fusion dim
 _C.MODEL.MIX_DIM = 768
