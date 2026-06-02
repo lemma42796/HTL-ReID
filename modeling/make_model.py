@@ -285,8 +285,10 @@ class HTLReID(nn.Module):
         self.agf_residual_weight = float(cfg.MODEL.AGF_RESIDUAL_WEIGHT)
         self.agf_learnable_residual = bool(cfg.MODEL.AGF_LEARNABLE_RESIDUAL)
         self.agf_fusion_mode = cfg.MODEL.AGF_FUSION_MODE.lower()
-        if self.agf_fusion_mode not in ('residual', 'agreement'):
-            raise ValueError("MODEL.AGF_FUSION_MODE must be 'residual' or 'agreement'")
+        if self.agf_fusion_mode not in ('residual', 'agreement', 'concat'):
+            raise ValueError("MODEL.AGF_FUSION_MODE must be 'residual', 'agreement', or 'concat'")
+        self.agf_concat_weight = float(cfg.MODEL.AGF_CONCAT_WEIGHT)
+        self.agf_aux_supervision = bool(cfg.MODEL.AGF_AUX_SUPERVISION)
         self.agf_agree_min = float(cfg.MODEL.AGF_AGREE_MIN)
         self.agf_agree_temp = float(cfg.MODEL.AGF_AGREE_TEMP)
         self.agf_norm_cap = float(cfg.MODEL.AGF_NORM_CAP)
@@ -319,6 +321,15 @@ class HTLReID(nn.Module):
                 init_ratio = init_weight / max_weight
                 init_logit = torch.logit(torch.tensor(init_ratio))
                 self.AGF_RESIDUAL_LOGIT = nn.Parameter(init_logit)
+            if self.agf_aux_supervision:
+                self.AGF_BASE_BN = nn.BatchNorm1d(3 * self.BACKBONE.token_dim)
+                self.AGF_BASE_HEAD = nn.Linear(3 * self.BACKBONE.token_dim,
+                                               num_classes, bias=False)
+                self.AGF_BRANCH_BN = nn.BatchNorm1d(3 * self.BACKBONE.token_dim)
+                self.AGF_BRANCH_HEAD = nn.Linear(3 * self.BACKBONE.token_dim,
+                                                 num_classes, bias=False)
+                self.AGF_BASE_HEAD.apply(weights_init_classifier)
+                self.AGF_BRANCH_HEAD.apply(weights_init_classifier)
         if self.use_adapter:
             self.MODALITY_ADAPTERS = nn.ModuleDict({
                 'RGB': ModalityAdapter(self.BACKBONE.token_dim,
@@ -342,8 +353,11 @@ class HTLReID(nn.Module):
             self.memory_cls = OCFR(dim=self.BACKBONE.token_dim, num_class=num_classes, momentum=0.8)
 
         # The output learning params of fused features
-        self.FUSE_HEAD = nn.Linear(3 * self.BACKBONE.token_dim, num_classes, bias=False)
-        self.FUSE_BN = nn.BatchNorm1d(3 * self.BACKBONE.token_dim)
+        self.fuse_dim = 3 * self.BACKBONE.token_dim
+        if self.use_agf and self.agf_fusion_mode == 'concat':
+            self.fuse_dim *= 2
+        self.FUSE_HEAD = nn.Linear(self.fuse_dim, num_classes, bias=False)
+        self.FUSE_BN = nn.BatchNorm1d(self.fuse_dim)
         self.FUSE_HEAD.apply(weights_init_classifier)
 
         # The output learning params of RGB/NIR/TIR cls tokens
@@ -455,6 +469,10 @@ class HTLReID(nn.Module):
                                     quality_scores, masks=masks)
         agf_cls = self.AGF(rgb_feat, nir_feat, tir_feat,
                            quality_scores=quality_scores, masks=masks)
+        self._last_agf_aux_features = (base_cls, agf_cls)
+        if self.agf_fusion_mode == 'concat':
+            return torch.cat([base_cls, self.agf_concat_weight * agf_cls], dim=-1)
+
         max_weight = max(0.0, min(1.0, self.agf_residual_weight))
         if self.agf_learnable_residual:
             weight = max_weight * torch.sigmoid(self.AGF_RESIDUAL_LOGIT)
@@ -480,6 +498,17 @@ class HTLReID(nn.Module):
             ).unsqueeze(-1)
             fused_nodes.append(base_node + weight * gate * delta)
         return torch.cat(fused_nodes, dim=-1)
+
+    def _agf_aux_pairs(self):
+        if (not self.training) or (not self.use_agf) or (not self.agf_aux_supervision):
+            return []
+        if not hasattr(self, '_last_agf_aux_features'):
+            return []
+        base_cls, agf_cls = self._last_agf_aux_features
+        return [
+            self.AGF_BASE_HEAD(self.AGF_BASE_BN(base_cls)), base_cls,
+            self.AGF_BRANCH_HEAD(self.AGF_BRANCH_BN(agf_cls)), agf_cls,
+        ]
 
     def _apply_modality_dropout(self, rgb, nir, tir=None, return_keep=False):
         if (not self.training) or self.modality_drop_prob <= 0:
@@ -716,17 +745,25 @@ class HTLReID(nn.Module):
                 RGB_feat_s, NIR_feat_s, TIR_feat_s, mask, quality_scores, has_tir=True)
             loss_aux = loss_aux + self._quality_dropout_loss(quality_scores, keep_mask)
             score = self.FUSE_HEAD(self.FUSE_BN(cls4t))
+            agf_aux_pairs = self._agf_aux_pairs()
             if self.use_part:
                 part_feat = self._part_feature(RGB_feat_s, NIR_feat_s, TIR_feat_s, quality_scores, masks=mask)
                 part_score = self.PART_HEAD(self.PART_BN(part_feat))
             if self.AL:
                 if self.use_part:
-                    return score, cls4t, ori_score, ori, part_score, part_feat, loss_aux
-                return score, cls4t, ori_score, ori, loss_aux
+                    return tuple([score, cls4t] + agf_aux_pairs +
+                                 [ori_score, ori, part_score, part_feat, loss_aux])
+                return tuple([score, cls4t] + agf_aux_pairs +
+                             [ori_score, ori, loss_aux])
             else:
                 if self.use_part:
-                    return score, cls4t, RGB_cls_score, RGB_cls4tri, NIR_cls_score, NIR_cls4tri, TIR_cls_score, TIR_cls4tri, part_score, part_feat, loss_aux
-                return score, cls4t, RGB_cls_score, RGB_cls4tri, NIR_cls_score, NIR_cls4tri, TIR_cls_score, TIR_cls4tri, loss_aux
+                    return tuple([score, cls4t] + agf_aux_pairs +
+                                 [RGB_cls_score, RGB_cls4tri, NIR_cls_score,
+                                  NIR_cls4tri, TIR_cls_score, TIR_cls4tri,
+                                  part_score, part_feat, loss_aux])
+                return tuple([score, cls4t] + agf_aux_pairs +
+                             [RGB_cls_score, RGB_cls4tri, NIR_cls_score,
+                              NIR_cls4tri, TIR_cls_score, TIR_cls4tri, loss_aux])
         else:
             RGB = x['RGB']
             NIR = x['NI']
@@ -816,17 +853,24 @@ class HTLReID(nn.Module):
                 RGB_feat_s, NIR_feat_s, TIR_feat_s, mask, quality_scores, has_tir=False)
             loss_aux = loss_aux + self._quality_dropout_loss(quality_scores, keep_mask)
             score = self.FUSE_HEAD(self.FUSE_BN(cls4t))
+            agf_aux_pairs = self._agf_aux_pairs()
             if self.use_part:
                 part_feat = self._part_feature(RGB_feat_s, NIR_feat_s, TIR_feat_s, quality_scores, masks=mask)
                 part_score = self.PART_HEAD(self.PART_BN(part_feat))
             if self.AL:
                 if self.use_part:
-                    return score, cls4t, ori_score, ori, part_score, part_feat, loss_aux
-                return score, cls4t, ori_score, ori, loss_aux
+                    return tuple([score, cls4t] + agf_aux_pairs +
+                                 [ori_score, ori, part_score, part_feat, loss_aux])
+                return tuple([score, cls4t] + agf_aux_pairs +
+                             [ori_score, ori, loss_aux])
             else:
                 if self.use_part:
-                    return score, cls4t, RGB_cls_score, RGB_cls4tri, NIR_cls_score, NIR_cls4tri, part_score, part_feat, loss_aux
-                return score, cls4t, RGB_cls_score, RGB_cls4tri, NIR_cls_score, NIR_cls4tri, loss_aux
+                    return tuple([score, cls4t] + agf_aux_pairs +
+                                 [RGB_cls_score, RGB_cls4tri, NIR_cls_score,
+                                  NIR_cls4tri, part_score, part_feat, loss_aux])
+                return tuple([score, cls4t] + agf_aux_pairs +
+                             [RGB_cls_score, RGB_cls4tri, NIR_cls_score,
+                              NIR_cls4tri, loss_aux])
 
         else:
             RGB = x['RGB']
