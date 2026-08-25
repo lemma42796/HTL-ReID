@@ -164,9 +164,6 @@ _C.MODEL.DROP_PATH = 0.1
 _C.MODEL.DROP_OUT = 0.0
 _C.MODEL.ATT_DROP_RATE = 0.0
 _C.MODEL.TRANSFORMER_TYPE = 'vit_base_patch16_224'
-# Run paired modalities as one larger batch through the shared ViT. This keeps
-# modality ownership unchanged while reducing Python and CUDA launch overhead.
-_C.MODEL.BATCH_MODALITIES = 1
 # The stride size of the backbone
 _C.MODEL.STRIDE_SIZE = [16, 16]
 

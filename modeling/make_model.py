@@ -254,7 +254,6 @@ class HTLReID(nn.Module):
         self.feat_h = int(cfg.INPUT.SIZE_TRAIN[0] // cfg.MODEL.STRIDE_SIZE[0])
         self.feat_w = int(cfg.INPUT.SIZE_TRAIN[1] // cfg.MODEL.STRIDE_SIZE[1])
         self.num_patches = self.feat_h * self.feat_w
-        self.batch_modalities = bool(cfg.MODEL.BATCH_MODALITIES)
         self.use_sfts = bool(cfg.MODEL.SFTS_ENABLED)
         if self.use_sfts and (bool(cfg.MODEL.HS_ENABLED) or bool(cfg.MODEL.FACSS_ENABLED)):
             raise ValueError('MODEL.SFTS_ENABLED is mutually exclusive with HS/FACSS')
@@ -606,49 +605,6 @@ class HTLReID(nn.Module):
             return rgb, nir, tir, keep
         return rgb, nir, tir
 
-    def _backbone_modalities(self, images, cam_label=None, view_label=None):
-        """Run paired modalities through the shared ViT in one batched call."""
-        images = tuple(images)
-        if not images:
-            raise ValueError('at least one modality image tensor is required')
-        if not self.batch_modalities or len(images) == 1:
-            return tuple(
-                self.BACKBONE(image, cam_label=cam_label, view_label=view_label)
-                for image in images
-            )
-
-        batch_size = images[0].size(0)
-        reference_shape = images[0].shape[1:]
-        if any(image.size(0) != batch_size or image.shape[1:] != reference_shape
-               for image in images[1:]):
-            raise ValueError('paired modality batches must have identical shapes')
-
-        modality_count = len(images)
-        batched_images = torch.cat(images, dim=0)
-
-        def batch_label(label):
-            if label is None:
-                return None
-            if label.size(0) != batch_size:
-                raise ValueError('camera/view labels must match modality batch size')
-            return torch.cat([label] * modality_count, dim=0)
-
-        batched_feat, batched_attn = self.BACKBONE(
-            batched_images,
-            cam_label=batch_label(cam_label),
-            view_label=batch_label(view_label),
-        )
-        feature_chunks = batched_feat.split(batch_size, dim=0)
-        attention_chunks = [[] for _ in images]
-        for layer_attention in batched_attn:
-            for modality_idx, chunk in enumerate(
-                    layer_attention.split(batch_size, dim=0)):
-                attention_chunks[modality_idx].append(chunk)
-        return tuple(
-            (feature_chunks[idx], attention_chunks[idx])
-            for idx in range(modality_count)
-        )
-
     def _adapt_features(self, rgb_feat, nir_feat, tir_feat=None):
         if not self.use_adapter:
             return rgb_feat, nir_feat, tir_feat
@@ -849,9 +805,9 @@ class HTLReID(nn.Module):
             TIR = x['TI']
             RGB, NIR, TIR, keep_mask = self._apply_modality_dropout(
                 RGB, NIR, TIR, return_keep=True)
-            ((RGB_feat, RGB_attn), (NIR_feat, NIR_attn),
-             (TIR_feat, TIR_attn)) = self._backbone_modalities(
-                 (RGB, NIR, TIR), cam_label=cam_label, view_label=view_label)
+            RGB_feat, RGB_attn = self.BACKBONE(RGB, cam_label=cam_label, view_label=view_label)
+            NIR_feat, NIR_attn = self.BACKBONE(NIR, cam_label=cam_label, view_label=view_label)
+            TIR_feat, TIR_attn = self.BACKBONE(TIR, cam_label=cam_label, view_label=view_label)
             RGB_feat, NIR_feat, TIR_feat = self._adapt_features(RGB_feat, NIR_feat, TIR_feat)
 
             RGB_cls4tri = RGB_feat[:, 0, :]
@@ -927,9 +883,9 @@ class HTLReID(nn.Module):
             RGB = x['RGB']
             NIR = x['NI']
             TIR = x['TI']
-            ((RGB_feat, RGB_attn), (NIR_feat, NIR_attn),
-             (TIR_feat, TIR_attn)) = self._backbone_modalities(
-                 (RGB, NIR, TIR), cam_label=cam_label, view_label=view_label)
+            RGB_feat, RGB_attn = self.BACKBONE(RGB, cam_label=cam_label, view_label=view_label)
+            NIR_feat, NIR_attn = self.BACKBONE(NIR, cam_label=cam_label, view_label=view_label)
+            TIR_feat, TIR_attn = self.BACKBONE(TIR, cam_label=cam_label, view_label=view_label)
             RGB_feat, NIR_feat, TIR_feat = self._adapt_features(RGB_feat, NIR_feat, TIR_feat)
             quality_scores = self.QUALITY_HEAD(RGB_feat[:, 0, :], NIR_feat[:, 0, :], TIR_feat[:, 0, :]) \
                 if self.use_quality else None
@@ -973,9 +929,8 @@ class HTLReID(nn.Module):
             NIR = x['NI']
             RGB, NIR, _, keep_mask = self._apply_modality_dropout(
                 RGB, NIR, None, return_keep=True)
-            ((RGB_feat, RGB_attn),
-             (NIR_feat, NIR_attn)) = self._backbone_modalities(
-                 (RGB, NIR), cam_label=cam_label, view_label=view_label)
+            RGB_feat, RGB_attn = self.BACKBONE(RGB, cam_label=cam_label, view_label=view_label)
+            NIR_feat, NIR_attn = self.BACKBONE(NIR, cam_label=cam_label, view_label=view_label)
             RGB_feat, NIR_feat, _ = self._adapt_features(RGB_feat, NIR_feat, None)
 
             RGB_cls4tri = RGB_feat[:, 0, :]
@@ -1044,9 +999,8 @@ class HTLReID(nn.Module):
         else:
             RGB = x['RGB']
             NIR = x['NI']
-            ((RGB_feat, RGB_attn),
-             (NIR_feat, NIR_attn)) = self._backbone_modalities(
-                 (RGB, NIR), cam_label=cam_label, view_label=view_label)
+            RGB_feat, RGB_attn = self.BACKBONE(RGB, cam_label=cam_label, view_label=view_label)
+            NIR_feat, NIR_attn = self.BACKBONE(NIR, cam_label=cam_label, view_label=view_label)
             RGB_feat, NIR_feat, _ = self._adapt_features(RGB_feat, NIR_feat, None)
             quality_scores = self.QUALITY_HEAD(RGB_feat[:, 0, :], NIR_feat[:, 0, :], None) \
                 if self.use_quality else None
