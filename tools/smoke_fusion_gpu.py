@@ -1,8 +1,14 @@
 """Short CUDA-only forward/backward smoke test for TPM/FACR configs."""
 
 import argparse
+from pathlib import Path
+import sys
 
 import torch
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from config import cfg as default_cfg
 from modeling.make_model import make_model
