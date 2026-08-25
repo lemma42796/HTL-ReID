@@ -13,9 +13,22 @@ The shared protocol is `configs/RGBNT201/paper/base.yml`; merge exactly one of
 `m0.yml` through `m3.yml` from the same directory. The older A0-A5 chain20
 overlays are archived diagnostic configurations, not formal paper configs.
 
-A3-A5 overlays, AGF/TPM fusion, modality adapters, part branches, and auxiliary
-loss/full branches are kept only for archived ablations or negative evidence.
-They are not the current paper-method path. HSL is not part of this model path.
+The old AGF-wrapped TPM path remains archived negative evidence. A separate,
+clean TOP-ReID TPM reproduction and the FACSS-guided FACR extension live under
+`configs/RGBNT201/fusion`; neither changes the completed M0-M3 results.
+Modality adapters, part branches, and auxiliary loss/full branches are not the
+current paper-method path. HSL is not part of this model path.
+
+## Cross-modal fusion extension
+
+Merge the frozen paper base with exactly one fusion overlay:
+
+- `t1_tpm.yml`: attributed TPM reproduction on complete backbone tokens.
+- `t2_adaptive_routing.yml`: adaptive all-connected routing without FACSS.
+- `t3_m2_facr.yml`: dense FACSS scores softly guide adaptive routing.
+
+TPM/FACR directly produce the supervised 3D descriptor. They do not use the
+legacy AGF wrapper, hard-pruned fusion input, or a `0.15` auxiliary concat.
 
 ## Requirements
 
@@ -88,6 +101,15 @@ Use `--dry-run` to inspect the experiment IDs, configs, output directories,
 epoch count, seed, and timeout without creating artifacts or starting training.
 
 ## Smoke Test
+
+For the new fusion rows, use the CUDA-only smoke test (it intentionally has no
+CPU fallback):
+
+```bash
+python tools/smoke_fusion_gpu.py
+```
+
+The broader legacy/paper regression suite remains available separately:
 
 ```bash
 python test_pipeline.py

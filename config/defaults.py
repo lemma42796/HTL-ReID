@@ -84,6 +84,20 @@ _C.MODEL.FACSS_MODALITY_UNION = 1
 # When another modality selects a patch, keep the same patch in this modality
 # too instead of pooling over a modality-specific mask only.
 _C.MODEL.FACSS_UNION_PROMOTE = 1
+# Standalone TOP-ReID TPM reproduction. Kept separate from the legacy AGF
+# wrapper so it receives complete backbone tokens and directly forms the main
+# descriptor.
+_C.MODEL.TPM = 0
+_C.MODEL.TPM_NUM_HEADS = 12
+# FACSS-guided Adaptive Cross-modal Routing (project extension).
+_C.MODEL.FACR = 0
+_C.MODEL.FACR_USE_SCORES = 1
+_C.MODEL.FACR_NUM_HEADS = 12
+_C.MODEL.FACR_STEPS = 3
+_C.MODEL.FACR_SCORE_BIAS_SCALE = 1.0
+_C.MODEL.FACR_SCORE_FLOOR = 0.05
+_C.MODEL.FACR_DETACH_SCORES = 1
+_C.MODEL.FACR_GATE_INIT_BIAS = 0.0
 # OCFR auxiliary loss (not in paper); off by default for paper-faithful reproduction
 _C.MODEL.OCFR = 0
 # Ablation switches (1=enable, 0=disable)

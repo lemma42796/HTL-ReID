@@ -266,7 +266,8 @@ class HSFACSS(nn.Module):
         cls_list: [cls_rgb, cls_nir, cls_tir] from un-modified backbone.
         mask_fre: [B, N] bool or None.
         Returns: feat_out [B, M, D] (zero-padded outside selection),
-                 sel_mask [B, N] bool of finally selected positions.
+                 sel_mask [B, N] bool of finally selected positions,
+                 guide_score [B, N] continuous full-token importance.
         """
         cls_token = m_feat[:, :1, :]                               # [B, 1, D]
         patches = m_feat[:, 1:, :]                                 # [B, N, D]
@@ -274,7 +275,8 @@ class HSFACSS(nn.Module):
 
         if not self.use_hs:
             full_mask = torch.ones(B, N, dtype=torch.bool, device=patches.device)
-            return m_feat, full_mask
+            full_score = torch.ones(B, N, dtype=patches.dtype, device=patches.device)
+            return m_feat, full_mask, full_score
 
         hs_mask, s_self_full, _ = self.hs(m_attn)                  # both per modality
         cand_mask = hs_mask
@@ -287,20 +289,28 @@ class HSFACSS(nn.Module):
                 [cls_token, patches * gate.unsqueeze(-1)],
                 dim=1,
             )
-            return feat_out, cand_mask
+            guide_score = self._normalize(s_self_full, 'minmax')
+            return feat_out, cand_mask, guide_score
 
         if s_cross_full is None:
             raise ValueError('FACSS requires a cached cross-modal score')
 
         s_self_norm = self._normalize(s_self_full, self.norm_mode, mask=cand_mask)
         s_cross_norm = self._normalize(s_cross_full, self.norm_mode, mask=cand_mask)
+        guide_self = self._normalize(s_self_full, self.norm_mode)
+        guide_cross = self._normalize(s_cross_full, self.norm_mode)
 
         if self.alpha_grain == 'sample':
             alpha = self._alpha(cls_list)                          # [B, 1]
             s_facss = s_self_norm + alpha * s_cross_norm
+            guide_score = guide_self + alpha * guide_cross
         else:
             alpha = self._alpha(cls_list, p_feats=patches)         # [B, N]
             s_facss = s_self_norm + alpha * s_cross_norm
+            guide_score = guide_self + alpha * guide_cross
+        # FACR consumes a dense, calibrated score over every patch. Candidate
+        # restriction remains exclusive to the legacy hard-selection path.
+        guide_score = self._normalize(guide_score, 'minmax')
 
         # Restrict scoring to candidate positions: non-candidates get -inf
         very_neg = torch.finfo(s_facss.dtype).min
@@ -336,12 +346,12 @@ class HSFACSS(nn.Module):
             [cls_token, patches * gate.unsqueeze(-1)],
             dim=1,
         )
-        return feat_out, sel_mask
+        return feat_out, sel_mask, guide_score
 
     def forward(self, RGB_feat, RGB_attn, NIR_feat=None, NIR_attn=None,
                 TIR_feat=None, TIR_attn=None, img_path=None,
                 writer=None, epoch=None, mask_fre=None,
-                quality_scores=None):
+                quality_scores=None, return_scores=False):
         cls_rgb = RGB_feat[:, 0, :]
         patches_rgb = RGB_feat[:, 1:, :]
 
@@ -372,17 +382,19 @@ class HSFACSS(nn.Module):
 
         outs = {}
         masks = {}
+        scores = {}
         for name, feat, attn, _, _ in modalities:
             modality_quality = None
             if quality is not None:
                 modality_quality = quality[name]
-            feat_out, sel_mask = self._select_one_modality(
+            feat_out, sel_mask, guide_score = self._select_one_modality(
                 feat, attn, None if cross_scores is None else cross_scores[name],
                 cls_list, mask_fre,
                 modality_quality,
             )
             outs[name] = feat_out
             masks[name] = sel_mask
+            scores[name] = guide_score
 
         if self.use_facss and self.modality_union and len(masks) > 1:
             shared_mask = None
@@ -398,5 +410,12 @@ class HSFACSS(nn.Module):
 
         # Maintain SFTS-style return tuple ordering for make_model.py.
         if 'TIR' in outs:
-            return outs['RGB'], outs['NIR'], outs['TIR'], (masks['RGB'], masks['NIR'], masks['TIR'])
-        return outs['RGB'], outs['NIR'], (masks['RGB'], masks['NIR'])
+            result = (outs['RGB'], outs['NIR'], outs['TIR'],
+                      (masks['RGB'], masks['NIR'], masks['TIR']))
+            if return_scores:
+                result += ((scores['RGB'], scores['NIR'], scores['TIR']),)
+            return result
+        result = (outs['RGB'], outs['NIR'], (masks['RGB'], masks['NIR']))
+        if return_scores:
+            result += ((scores['RGB'], scores['NIR']),)
+        return result

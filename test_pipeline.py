@@ -341,6 +341,8 @@ def test_paper_config_matrix():
         assert actual == values, '{} switches {} != {}'.format(row, actual, values)
         assert not c.MODEL.FREQUENCY_ENABLED
         assert not c.MODEL.AGF
+        assert not c.MODEL.TPM
+        assert not c.MODEL.FACR
         assert not c.MODEL.MODALITY_ADAPTER
         assert not c.MODEL.PART_BRANCH
         assert not c.MODEL.OCFR

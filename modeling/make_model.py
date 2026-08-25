@@ -8,6 +8,7 @@ from modeling.fusion_part.Frequency import Frequency_based_Token_Selection
 from modeling.fusion_part.OCFR import OCFR
 from modeling.fusion_part.HS_FACSS import HSFACSS
 from modeling.fusion_part.AGF import AGF
+from modeling.fusion_part.TPM import TPM, FACR
 
 
 def weights_init_kaiming(m):
@@ -257,7 +258,14 @@ class HTLReID(nn.Module):
         self.FREQ_INDEX = Frequency_based_Token_Selection(keep=cfg.MODEL.FREQUENCY_KEEP,
                                                           stride=cfg.MODEL.STRIDE_SIZE[0],
                                                           quality_aware=cfg.MODEL.FREQUENCY_QUALITY_AWARE)
-        self.use_agf = cfg.MODEL.AGF
+        self.use_agf = bool(cfg.MODEL.AGF)
+        self.use_tpm = bool(cfg.MODEL.TPM)
+        self.use_facr = bool(cfg.MODEL.FACR)
+        self.facr_use_scores = bool(cfg.MODEL.FACR_USE_SCORES)
+        if sum((self.use_agf, self.use_tpm, self.use_facr)) > 1:
+            raise ValueError('MODEL.AGF, MODEL.TPM, and MODEL.FACR are mutually exclusive')
+        if self.use_facr and self.facr_use_scores and not bool(cfg.MODEL.FACSS_ENABLED):
+            raise ValueError('FACR_USE_SCORES requires FACSS_ENABLED')
         self.use_ocfr = bool(cfg.MODEL.OCFR)
         self.use_quality = bool(cfg.MODEL.QUALITY_AWARE)
         self.use_adapter = bool(cfg.MODEL.MODALITY_ADAPTER)
@@ -307,6 +315,22 @@ class HTLReID(nn.Module):
                 num_heads=cfg.MODEL.SELECTED_AGG_NUM_HEADS,
                 gate_init_bias=cfg.MODEL.SELECTED_AGG_GATE_INIT_BIAS,
                 residual_weight=cfg.MODEL.SELECTED_AGG_RESIDUAL_WEIGHT,
+            )
+        if self.use_tpm:
+            self.TPM = TPM(
+                dim=self.BACKBONE.token_dim,
+                num_heads=cfg.MODEL.TPM_NUM_HEADS,
+            )
+        if self.use_facr:
+            self.FACR = FACR(
+                dim=self.BACKBONE.token_dim,
+                num_heads=cfg.MODEL.FACR_NUM_HEADS,
+                steps=cfg.MODEL.FACR_STEPS,
+                score_bias_scale=(cfg.MODEL.FACR_SCORE_BIAS_SCALE
+                                  if self.facr_use_scores else 0.0),
+                score_floor=cfg.MODEL.FACR_SCORE_FLOOR,
+                detach_scores=bool(cfg.MODEL.FACR_DETACH_SCORES),
+                gate_init_bias=cfg.MODEL.FACR_GATE_INIT_BIAS,
             )
         if self.use_agf:
             self.AGF = AGF(dim=self.BACKBONE.token_dim,
@@ -500,6 +524,23 @@ class HTLReID(nn.Module):
             ).unsqueeze(-1)
             fused_nodes.append(base_node + weight * gate * delta)
         return torch.cat(fused_nodes, dim=-1)
+
+    def _fusion_cls(self, full_feats, selected_feats, quality_scores=None,
+                    masks=None, facss_scores=None):
+        """Select exactly one descriptor path while keeping inputs explicit."""
+        rgb_full, nir_full, tir_full = full_feats
+        rgb_sel, nir_sel, tir_sel = selected_feats
+        if self.use_tpm:
+            return self.TPM(rgb_full, nir_full, tir_full)
+        if self.use_facr:
+            scores = facss_scores if self.facr_use_scores else None
+            return self.FACR(
+                rgb_full, nir_full, tir_full, scores=scores)
+        if self.use_agf:
+            return self._agf_cls(
+                rgb_sel, nir_sel, tir_sel, quality_scores, masks=masks)
+        return self._concat_cls(
+            rgb_sel, nir_sel, tir_sel, quality_scores, masks=masks)
 
     def _agf_aux_pairs(self):
         if (not self.training) or (not self.use_agf) or (not self.agf_aux_supervision):
@@ -752,23 +793,24 @@ class HTLReID(nn.Module):
                 NIR_cls_score = self.BACKBONE_HEAD(self.BACKBONE_BN(NIR_cls4tri))
                 TIR_cls_score = self.BACKBONE_HEAD(self.BACKBONE_BN(TIR_cls4tri))
 
-            RGB_feat_s, NIR_feat_s, TIR_feat_s, mask = self.HS_FACSS(RGB_feat=RGB_feat,
-                                                                     RGB_attn=RGB_attn,
-                                                                     NIR_feat=NIR_feat,
-                                                                     NIR_attn=NIR_attn,
-                                                                     TIR_feat=TIR_feat,
-                                                                     TIR_attn=TIR_attn,
-                                                                     img_path=img_path,
-                                                                     epoch=epoch, writer=writer,
-                                                                     mask_fre=mask_fre,
-                                                                     quality_scores=quality_scores)
-
-            if self.use_agf:
-                cls4t = self._agf_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
-                                      quality_scores, masks=mask)
+            selection = self.HS_FACSS(
+                RGB_feat=RGB_feat, RGB_attn=RGB_attn,
+                NIR_feat=NIR_feat, NIR_attn=NIR_attn,
+                TIR_feat=TIR_feat, TIR_attn=TIR_attn,
+                img_path=img_path, epoch=epoch, writer=writer,
+                mask_fre=mask_fre, quality_scores=quality_scores,
+                return_scores=self.use_facr and self.facr_use_scores)
+            if self.use_facr and self.facr_use_scores:
+                RGB_feat_s, NIR_feat_s, TIR_feat_s, mask, facss_scores = selection
             else:
-                cls4t = self._concat_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
-                                         quality_scores, masks=mask)
+                RGB_feat_s, NIR_feat_s, TIR_feat_s, mask = selection
+                facss_scores = None
+
+            cls4t = self._fusion_cls(
+                (RGB_feat, NIR_feat, TIR_feat),
+                (RGB_feat_s, NIR_feat_s, TIR_feat_s),
+                quality_scores=quality_scores, masks=mask,
+                facss_scores=facss_scores)
             if self.use_ocfr:
                 RGB_cls = RGB_feat_s[:, 0, :]
                 NIR_cls = NIR_feat_s[:, 0, :]
@@ -812,23 +854,24 @@ class HTLReID(nn.Module):
             mask_fre = self._frequency_mask(
                 RGB, NIR, TIR, img_path, mode, writer, epoch, quality_scores)
 
-            RGB_feat_s, NIR_feat_s, TIR_feat_s, mask = self.HS_FACSS(RGB_feat=RGB_feat,
-                                                                     RGB_attn=RGB_attn,
-                                                                     NIR_feat=NIR_feat,
-                                                                     NIR_attn=NIR_attn,
-                                                                     TIR_feat=TIR_feat,
-                                                                     TIR_attn=TIR_attn,
-                                                                     img_path=img_path,
-                                                                     epoch=epoch, writer=writer,
-                                                                     mask_fre=mask_fre,
-                                                                     quality_scores=quality_scores)
-
-            if self.use_agf:
-                cls4t = self._agf_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
-                                      quality_scores, masks=mask)
+            selection = self.HS_FACSS(
+                RGB_feat=RGB_feat, RGB_attn=RGB_attn,
+                NIR_feat=NIR_feat, NIR_attn=NIR_attn,
+                TIR_feat=TIR_feat, TIR_attn=TIR_attn,
+                img_path=img_path, epoch=epoch, writer=writer,
+                mask_fre=mask_fre, quality_scores=quality_scores,
+                return_scores=self.use_facr and self.facr_use_scores)
+            if self.use_facr and self.facr_use_scores:
+                RGB_feat_s, NIR_feat_s, TIR_feat_s, mask, facss_scores = selection
             else:
-                cls4t = self._concat_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
-                                         quality_scores, masks=mask)
+                RGB_feat_s, NIR_feat_s, TIR_feat_s, mask = selection
+                facss_scores = None
+
+            cls4t = self._fusion_cls(
+                (RGB_feat, NIR_feat, TIR_feat),
+                (RGB_feat_s, NIR_feat_s, TIR_feat_s),
+                quality_scores=quality_scores, masks=mask,
+                facss_scores=facss_scores)
             return self._test_descriptor(cls4t, RGB_feat_s, NIR_feat_s, TIR_feat_s,
                                          quality_scores, masks=mask)
 
@@ -836,6 +879,8 @@ class HTLReID(nn.Module):
                                mode=1,
                                writer=None, epoch=None):
         # This forward function is used for the two modalities datasets like RGBN300
+        if self.use_tpm or self.use_facr:
+            raise ValueError('TPM and FACR currently require RGB/NIR/TIR input')
         if self.training:
             RGB = x['RGB']
             NIR = x['NI']
