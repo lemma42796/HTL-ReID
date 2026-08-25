@@ -550,7 +550,7 @@ def test_optimizer_parameter_groups():
 
 
 def test_facr_score_bias_starts_from_t2():
-    print('[13] FACR score bias is zero-initialized and bounded')
+    print('[13] FACR score bias and hard mask behavior')
     torch.manual_seed(11)
     attention = ScoreBiasedCrossAttention(
         dim=16, num_heads=2, score_bias_scale=0.25,
@@ -572,7 +572,32 @@ def test_facr_score_bias_starts_from_t2():
         attention.score_bias_scale * torch.tanh(attention.score_bias_gain)
     ).abs().item()
     assert effective_gain <= 0.25
-    print('     OK initial output=T2; learned guidance bounded at {:.3f}'.format(
+
+    mask = torch.tensor([
+        [True, True, True, False, False, False],
+        [True, False, True, False, True, False],
+    ])
+    masked = attention(query, source, mask=mask)
+    changed_source = source.clone()
+    changed_source[~mask] = torch.randn_like(changed_source[~mask]) * 1e4
+    changed_masked = attention(query, changed_source, mask=mask)
+    assert torch.allclose(masked, changed_masked, atol=1e-6, rtol=1e-5)
+    try:
+        attention(query, source, mask=torch.zeros_like(mask))
+    except ValueError as exc:
+        assert 'at least one' in str(exc)
+    else:
+        raise AssertionError('an empty FACSS mask must be rejected')
+
+    t4 = default_cfg.clone()
+    t4.merge_from_file(PAPER_BASE)
+    t4.merge_from_file('configs/RGBNT201/fusion/t4_facss_masked_facr.yml')
+    assert t4.MODEL.FACR
+    assert t4.MODEL.FACR_USE_MASKS
+    assert not t4.MODEL.FACR_USE_SCORES
+    assert not t4.MODEL.FACSS_DYNAMIC_K
+    assert t4.MODEL.FACSS_K == 16
+    print('     OK initial output=T2; gain bounded at {:.3f}; mask is hard'.format(
         effective_gain))
 
 

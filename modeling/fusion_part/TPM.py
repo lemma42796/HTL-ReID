@@ -33,7 +33,8 @@ class ScoreBiasedCrossAttention(nn.Module):
         # Start exactly from score-free FACR (T2). The bounded gain can only
         # introduce FACSS guidance gradually when the identification objective
         # finds it useful.
-        self.score_bias_gain = nn.Parameter(torch.zeros(()))
+        self.score_bias_gain = nn.Parameter(
+            torch.zeros(()), requires_grad=self.score_bias_scale != 0.0)
         self.detach_scores = bool(detach_scores)
         self.source_norm = nn.LayerNorm(dim)
         self.q = nn.Linear(dim, dim, bias=qkv_bias)
@@ -49,7 +50,7 @@ class ScoreBiasedCrossAttention(nn.Module):
         hi = scores.max(dim=1, keepdim=True).values
         return (scores - lo) / (hi - lo + 1e-6)
 
-    def forward(self, query, source_tokens, scores=None):
+    def forward(self, query, source_tokens, scores=None, mask=None):
         batch, tokens, dim = source_tokens.shape
         if query.shape != (batch, dim):
             raise ValueError('query and source token dimensions do not match')
@@ -61,6 +62,14 @@ class ScoreBiasedCrossAttention(nn.Module):
         v = self.v(source_tokens).view(batch, tokens, self.num_heads, self.head_dim)
         v = v.permute(0, 2, 1, 3)
         logits = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+
+        attention_gate = None
+        if mask is not None:
+            if mask.shape != (batch, tokens):
+                raise ValueError('FACSS mask shape must match source patches')
+            attention_gate = mask.to(device=logits.device, dtype=logits.dtype)
+            if not attention_gate.detach().bool().any(dim=1).all():
+                raise ValueError('FACSS mask must retain at least one source patch')
 
         if scores is not None and self.score_bias_scale != 0.0:
             if scores.shape != (batch, tokens):
@@ -76,7 +85,11 @@ class ScoreBiasedCrossAttention(nn.Module):
             gain = self.score_bias_scale * torch.tanh(self.score_bias_gain)
             logits = logits + gain * bias[:, None, None, :]
 
-        attention = self.attn_drop(logits.softmax(dim=-1))
+        attention = logits.softmax(dim=-1)
+        if attention_gate is not None:
+            attention = attention * attention_gate[:, None, None, :]
+            attention = attention / attention.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+        attention = self.attn_drop(attention)
         context = torch.matmul(attention, v).transpose(1, 2).reshape(batch, dim)
         return self.proj_drop(self.proj(context))
 
@@ -98,9 +111,11 @@ class ResidualCrossAttentionBlock(nn.Module):
             in_features=dim, hidden_features=int(dim * mlp_ratio),
             act_layer=nn.GELU, drop=0.0)
 
-    def forward(self, query, source_tokens, scores=None):
+    def forward(self, query, source_tokens, scores=None, mask=None):
         query = query + self.drop_path(
-            self.attn(self.query_norm(query), source_tokens, scores=scores))
+            self.attn(
+                self.query_norm(query), source_tokens,
+                scores=scores, mask=mask))
         return query + self.drop_path(self.mlp(self.mlp_norm(query)))
 
 
@@ -199,7 +214,7 @@ class AdaptiveRoutingStage(nn.Module):
     def _replace_cls(feat, cls):
         return torch.cat([cls.unsqueeze(1), feat[:, 1:, :]], dim=1)
 
-    def _update_one(self, target_idx, feats, scores):
+    def _update_one(self, target_idx, feats, scores, masks):
         target = feats[target_idx][:, 0, :]
         contexts = []
         route_logits = []
@@ -207,10 +222,12 @@ class AdaptiveRoutingStage(nn.Module):
             if source_idx == target_idx:
                 continue
             source_score = None if scores is None else scores[source_idx]
+            source_mask = None if masks is None else masks[source_idx]
             if source_score is not None and self.attn.detach_scores:
                 source_score = source_score.detach()
             contexts.append(self.attn(
-                self.query_norm(target), source[:, 1:, :], scores=source_score))
+                self.query_norm(target), source[:, 1:, :],
+                scores=source_score, mask=source_mask))
             route_input = torch.cat([
                 target, source[:, 0, :], self._score_stats(source_score, target)
             ], dim=-1)
@@ -223,8 +240,10 @@ class AdaptiveRoutingStage(nn.Module):
         updated = target + gate * context
         return updated + self.mlp(self.mlp_norm(updated))
 
-    def forward(self, feats, scores=None):
-        updated = [self._update_one(i, feats, scores) for i in range(3)]
+    def forward(self, feats, scores=None, masks=None):
+        updated = [
+            self._update_one(i, feats, scores, masks) for i in range(3)
+        ]
         return tuple(
             self._replace_cls(feat, cls)
             for feat, cls in zip(feats, updated)
@@ -259,10 +278,12 @@ class FACR(nn.Module):
             nn.init.zeros_(stage.gate.weight)
             nn.init.constant_(stage.gate.bias, float(gate_init_bias))
 
-    def forward(self, rgb, nir, tir, scores=None):
+    def forward(self, rgb, nir, tir, scores=None, masks=None):
         if scores is not None and len(scores) != 3:
             raise ValueError('FACR requires one FACSS score tensor per modality')
+        if masks is not None and len(masks) != 3:
+            raise ValueError('FACR requires one FACSS mask tensor per modality')
         feats = (rgb, nir, tir)
         for stage in self.stages:
-            feats = stage(feats, scores=scores)
+            feats = stage(feats, scores=scores, masks=masks)
         return torch.cat([feat[:, 0, :] for feat in feats], dim=-1)

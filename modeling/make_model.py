@@ -262,10 +262,13 @@ class HTLReID(nn.Module):
         self.use_tpm = bool(cfg.MODEL.TPM)
         self.use_facr = bool(cfg.MODEL.FACR)
         self.facr_use_scores = bool(cfg.MODEL.FACR_USE_SCORES)
+        self.facr_use_masks = bool(cfg.MODEL.FACR_USE_MASKS)
         if sum((self.use_agf, self.use_tpm, self.use_facr)) > 1:
             raise ValueError('MODEL.AGF, MODEL.TPM, and MODEL.FACR are mutually exclusive')
         if self.use_facr and self.facr_use_scores and not bool(cfg.MODEL.FACSS_ENABLED):
             raise ValueError('FACR_USE_SCORES requires FACSS_ENABLED')
+        if self.use_facr and self.facr_use_masks and not bool(cfg.MODEL.FACSS_ENABLED):
+            raise ValueError('FACR_USE_MASKS requires FACSS_ENABLED')
         self.use_ocfr = bool(cfg.MODEL.OCFR)
         self.use_quality = bool(cfg.MODEL.QUALITY_AWARE)
         self.use_adapter = bool(cfg.MODEL.MODALITY_ADAPTER)
@@ -526,7 +529,7 @@ class HTLReID(nn.Module):
         return torch.cat(fused_nodes, dim=-1)
 
     def _fusion_cls(self, full_feats, selected_feats, quality_scores=None,
-                    masks=None, facss_scores=None):
+                    masks=None, facss_scores=None, facr_masks=None):
         """Select exactly one descriptor path while keeping inputs explicit."""
         rgb_full, nir_full, tir_full = full_feats
         rgb_sel, nir_sel, tir_sel = selected_feats
@@ -534,8 +537,10 @@ class HTLReID(nn.Module):
             return self.TPM(rgb_full, nir_full, tir_full)
         if self.use_facr:
             scores = facss_scores if self.facr_use_scores else None
+            facr_masks = facr_masks if self.facr_use_masks else None
             return self.FACR(
-                rgb_full, nir_full, tir_full, scores=scores)
+                rgb_full, nir_full, tir_full,
+                scores=scores, masks=facr_masks)
         if self.use_agf:
             return self._agf_cls(
                 rgb_sel, nir_sel, tir_sel, quality_scores, masks=masks)
@@ -799,18 +804,23 @@ class HTLReID(nn.Module):
                 TIR_feat=TIR_feat, TIR_attn=TIR_attn,
                 img_path=img_path, epoch=epoch, writer=writer,
                 mask_fre=mask_fre, quality_scores=quality_scores,
-                return_scores=self.use_facr and self.facr_use_scores)
+                return_scores=self.use_facr and self.facr_use_scores,
+                return_gates=self.use_facr and self.facr_use_masks)
+            RGB_feat_s, NIR_feat_s, TIR_feat_s, mask = selection[:4]
+            selection_idx = 4
+            facss_scores = None
+            facss_gates = None
             if self.use_facr and self.facr_use_scores:
-                RGB_feat_s, NIR_feat_s, TIR_feat_s, mask, facss_scores = selection
-            else:
-                RGB_feat_s, NIR_feat_s, TIR_feat_s, mask = selection
-                facss_scores = None
+                facss_scores = selection[selection_idx]
+                selection_idx += 1
+            if self.use_facr and self.facr_use_masks:
+                facss_gates = selection[selection_idx]
 
             cls4t = self._fusion_cls(
                 (RGB_feat, NIR_feat, TIR_feat),
                 (RGB_feat_s, NIR_feat_s, TIR_feat_s),
                 quality_scores=quality_scores, masks=mask,
-                facss_scores=facss_scores)
+                facss_scores=facss_scores, facr_masks=facss_gates)
             if self.use_ocfr:
                 RGB_cls = RGB_feat_s[:, 0, :]
                 NIR_cls = NIR_feat_s[:, 0, :]
@@ -860,18 +870,23 @@ class HTLReID(nn.Module):
                 TIR_feat=TIR_feat, TIR_attn=TIR_attn,
                 img_path=img_path, epoch=epoch, writer=writer,
                 mask_fre=mask_fre, quality_scores=quality_scores,
-                return_scores=self.use_facr and self.facr_use_scores)
+                return_scores=self.use_facr and self.facr_use_scores,
+                return_gates=self.use_facr and self.facr_use_masks)
+            RGB_feat_s, NIR_feat_s, TIR_feat_s, mask = selection[:4]
+            selection_idx = 4
+            facss_scores = None
+            facss_gates = None
             if self.use_facr and self.facr_use_scores:
-                RGB_feat_s, NIR_feat_s, TIR_feat_s, mask, facss_scores = selection
-            else:
-                RGB_feat_s, NIR_feat_s, TIR_feat_s, mask = selection
-                facss_scores = None
+                facss_scores = selection[selection_idx]
+                selection_idx += 1
+            if self.use_facr and self.facr_use_masks:
+                facss_gates = selection[selection_idx]
 
             cls4t = self._fusion_cls(
                 (RGB_feat, NIR_feat, TIR_feat),
                 (RGB_feat_s, NIR_feat_s, TIR_feat_s),
                 quality_scores=quality_scores, masks=mask,
-                facss_scores=facss_scores)
+                facss_scores=facss_scores, facr_masks=facss_gates)
             return self._test_descriptor(cls4t, RGB_feat_s, NIR_feat_s, TIR_feat_s,
                                          quality_scores, masks=mask)
 

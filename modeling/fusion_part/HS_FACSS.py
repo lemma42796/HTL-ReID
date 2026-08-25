@@ -120,6 +120,9 @@ class HSFACSS(nn.Module):
             )
             nn.init.zeros_(self.k_mlp[-1].weight)
             nn.init.zeros_(self.k_mlp[-1].bias)
+            if not self.dynamic_k:
+                for parameter in self.k_mlp.parameters():
+                    parameter.requires_grad_(False)
 
     @staticmethod
     def _normalize(s, mode, mask=None, eps=1e-6):
@@ -276,7 +279,7 @@ class HSFACSS(nn.Module):
         if not self.use_hs:
             full_mask = torch.ones(B, N, dtype=torch.bool, device=patches.device)
             full_score = torch.ones(B, N, dtype=patches.dtype, device=patches.device)
-            return m_feat, full_mask, full_score
+            return m_feat, full_mask, full_score, full_mask.to(patches.dtype)
 
         hs_mask, s_self_full, _ = self.hs(m_attn)                  # both per modality
         cand_mask = hs_mask
@@ -290,7 +293,7 @@ class HSFACSS(nn.Module):
                 dim=1,
             )
             guide_score = self._normalize(s_self_full, 'minmax')
-            return feat_out, cand_mask, guide_score
+            return feat_out, cand_mask, guide_score, gate
 
         if s_cross_full is None:
             raise ValueError('FACSS requires a cached cross-modal score')
@@ -336,6 +339,7 @@ class HSFACSS(nn.Module):
             gate = sel_mask_f + soft - soft.detach()
         else:
             gate = sel_mask_f
+        facr_gate = gate
         if self.soft_residual_weight > 0:
             if not (self.use_ste and self.training):
                 soft = F.softmax(s_facss / self.ste_tau, dim=1)
@@ -346,12 +350,13 @@ class HSFACSS(nn.Module):
             [cls_token, patches * gate.unsqueeze(-1)],
             dim=1,
         )
-        return feat_out, sel_mask, guide_score
+        return feat_out, sel_mask, guide_score, facr_gate
 
     def forward(self, RGB_feat, RGB_attn, NIR_feat=None, NIR_attn=None,
                 TIR_feat=None, TIR_attn=None, img_path=None,
                 writer=None, epoch=None, mask_fre=None,
-                quality_scores=None, return_scores=False):
+                quality_scores=None, return_scores=False,
+                return_gates=False):
         cls_rgb = RGB_feat[:, 0, :]
         patches_rgb = RGB_feat[:, 1:, :]
 
@@ -383,11 +388,12 @@ class HSFACSS(nn.Module):
         outs = {}
         masks = {}
         scores = {}
+        gates = {}
         for name, feat, attn, _, _ in modalities:
             modality_quality = None
             if quality is not None:
                 modality_quality = quality[name]
-            feat_out, sel_mask, guide_score = self._select_one_modality(
+            feat_out, sel_mask, guide_score, facr_gate = self._select_one_modality(
                 feat, attn, None if cross_scores is None else cross_scores[name],
                 cls_list, mask_fre,
                 modality_quality,
@@ -395,6 +401,7 @@ class HSFACSS(nn.Module):
             outs[name] = feat_out
             masks[name] = sel_mask
             scores[name] = guide_score
+            gates[name] = facr_gate
 
         if self.use_facss and self.modality_union and len(masks) > 1:
             shared_mask = None
@@ -407,6 +414,11 @@ class HSFACSS(nn.Module):
                     promoted = torch.where(extra_mask, feat[:, 1:, :], outs[name][:, 1:, :])
                     outs[name] = torch.cat([outs[name][:, :1, :], promoted], dim=1)
             masks = {name: shared_mask for name in masks}
+            shared_gate = None
+            for facr_gate in gates.values():
+                shared_gate = (facr_gate if shared_gate is None else
+                               1.0 - (1.0 - shared_gate) * (1.0 - facr_gate))
+            gates = {name: shared_gate for name in gates}
 
         # Maintain SFTS-style return tuple ordering for make_model.py.
         if 'TIR' in outs:
@@ -414,8 +426,12 @@ class HSFACSS(nn.Module):
                       (masks['RGB'], masks['NIR'], masks['TIR']))
             if return_scores:
                 result += ((scores['RGB'], scores['NIR'], scores['TIR']),)
+            if return_gates:
+                result += ((gates['RGB'], gates['NIR'], gates['TIR']),)
             return result
         result = (outs['RGB'], outs['NIR'], (masks['RGB'], masks['NIR']))
         if return_scores:
             result += ((scores['RGB'], scores['NIR']),)
+        if return_gates:
+            result += ((gates['RGB'], gates['NIR']),)
         return result

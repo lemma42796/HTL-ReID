@@ -1,0 +1,22 @@
+# T4: true selection-then-fusion. FACSS Top-K masks restrict which complete
+# backbone patch tokens FACR may read; continuous score bias is disabled.
+MODEL:
+  HS_ENABLED: 1
+  FACSS_ENABLED: 1
+  FACSS_DYNAMIC_K: 0
+  FACSS_K: 16
+  FACSS_SOFT_RESIDUAL_WEIGHT: 0.0
+  FACSS_MODALITY_UNION: 0
+  FACSS_UNION_PROMOTE: 0
+  QUALITY_AWARE: 0
+  SELECTED_PATCH_BLEND_WEIGHT: 0.0
+  TPM: 0
+  FACR: 1
+  FACR_USE_SCORES: 0
+  FACR_USE_MASKS: 1
+  FACR_NUM_HEADS: 12
+  FACR_STEPS: 3
+  FACR_SCORE_BIAS_SCALE: 0.0
+  FACR_SCORE_FLOOR: 0.05
+  FACR_DETACH_SCORES: 1
+  FACR_GATE_INIT_BIAS: 0.0
