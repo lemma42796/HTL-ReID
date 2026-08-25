@@ -19,6 +19,9 @@ Coverage:
  10. Loss assembly matches engine/processor.py's odd/even pairing rule
  11. state_dict save -> reload -> identical forward output
  12. Ablation switches (AGF=0, OCFR=1) each produce a usable model
+ 13. Paper M0-M3 configs differ only through explicit HS/FACSS/QAWF switches
+ 14. M0 bypass, HS-only, and HS+FACSS selection paths behave distinctly
+ 15. Every paper row completes an end-to-end train/eval smoke pass
 
 Run:
     python3 test_pipeline.py
@@ -30,6 +33,7 @@ import torch
 
 from config import cfg as default_cfg
 from modeling.make_model import make_model
+from modeling.fusion_part.HS_FACSS import HSFACSS
 from solver.scheduler_factory import create_scheduler
 
 
@@ -39,6 +43,13 @@ YMLS = [
     'configs/MSVR310/default.yml',
     'configs/RGBNT100/default.yml',
 ]
+PAPER_BASE = 'configs/RGBNT201/paper/base.yml'
+PAPER_ROWS = {
+    'M0': 'configs/RGBNT201/paper/m0.yml',
+    'M1': 'configs/RGBNT201/paper/m1.yml',
+    'M2': 'configs/RGBNT201/paper/m2.yml',
+    'M3': 'configs/RGBNT201/paper/m3.yml',
+}
 
 NUM_CLASSES = 8
 BATCH = 2
@@ -59,6 +70,13 @@ def _make_cfg(yml=None, **overrides):
         for p in parts[:-1]:
             node = getattr(node, p)
         setattr(node, parts[-1], v)
+    return c
+
+
+def _make_paper_cfg(row):
+    c = default_cfg.clone()
+    c.merge_from_file(PAPER_BASE)
+    c.merge_from_file(PAPER_ROWS[row])
     return c
 
 
@@ -99,6 +117,9 @@ def test_defaults_load():
     c = default_cfg.clone()
     c.freeze()
     assert c.MODEL.AGF in (0, 1)
+    assert c.MODEL.HS_ENABLED in (0, 1)
+    assert c.MODEL.FACSS_ENABLED in (0, 1)
+    assert c.MODEL.FREQUENCY_ENABLED in (0, 1)
     print('     OK')
 
 
@@ -286,6 +307,151 @@ def test_ablation_switches():
             m['MODEL.AGF'], m['MODEL.OCFR'], n_params))
 
 
+def test_paper_config_matrix():
+    print('[9] formal paper config matrix')
+    expected = {
+        'M0': (0, 0, 0, 0.0),
+        'M1': (1, 0, 0, 0.15),
+        'M2': (1, 1, 0, 0.15),
+        'M3': (1, 1, 1, 0.15),
+    }
+    for row, values in expected.items():
+        c = _make_paper_cfg(row)
+        actual = (
+            int(c.MODEL.HS_ENABLED),
+            int(c.MODEL.FACSS_ENABLED),
+            int(c.MODEL.QUALITY_AWARE),
+            float(c.MODEL.SELECTED_PATCH_BLEND_WEIGHT),
+        )
+        assert actual == values, '{} switches {} != {}'.format(row, actual, values)
+        assert not c.MODEL.FREQUENCY_ENABLED
+        assert not c.MODEL.AGF
+        assert not c.MODEL.MODALITY_ADAPTER
+        assert not c.MODEL.PART_BRANCH
+        assert not c.MODEL.OCFR
+        assert c.MODEL.ALIGN_LOSS_WEIGHT == 0
+        assert c.MODEL.TOKEN_CONSISTENCY_WEIGHT == 0
+        assert c.MODEL.BCC_LOSS_WEIGHT == 0
+        assert c.MODEL.AUX_LOSS_WEIGHT == 0
+        assert c.TEST.RE_RANKING == 'no'
+        assert c.SOLVER.SEED == 1111
+        assert c.SOLVER.IMS_PER_BATCH == 40
+        assert c.SOLVER.MAX_EPOCHS == 120
+        assert c.SOLVER.TRAIN_EPOCHS == 0
+        c.freeze()
+        print('     OK {}  HS={} FACSS={} QAWF={}'.format(
+            row, actual[0], actual[1], actual[2]))
+
+
+def _selection_inputs(dim=16, tokens=8, layers=3):
+    features = [torch.randn(BATCH, tokens + 1, dim) for _ in range(3)]
+    attentions = []
+    for _ in range(3):
+        modal_attn = []
+        for _ in range(layers):
+            logits = torch.randn(BATCH, 2, tokens + 1, tokens + 1)
+            modal_attn.append(torch.softmax(logits, dim=-1))
+        attentions.append(modal_attn)
+    return features, attentions
+
+
+def _run_selector(selector, features, attentions):
+    return selector(
+        RGB_feat=features[0], RGB_attn=attentions[0],
+        NIR_feat=features[1], NIR_attn=attentions[1],
+        TIR_feat=features[2], TIR_attn=attentions[2],
+    )
+
+
+def test_hs_facss_modes():
+    print('[10] explicit M0 / HS-only / HS+FACSS paths')
+    features, attentions = _selection_inputs()
+
+    c = default_cfg.clone()
+    c.MODEL.HS_ENABLED = 0
+    c.MODEL.FACSS_ENABLED = 0
+    bypass = HSFACSS(dim=16, cfg=c).eval()
+    bypass_out = _run_selector(bypass, features, attentions)
+    for original, selected in zip(features, bypass_out[:3]):
+        assert torch.equal(original, selected)
+    for mask in bypass_out[3]:
+        assert mask.all()
+    assert not hasattr(bypass, 'alpha_mlp')
+    assert not hasattr(bypass, 'k_mlp')
+    print('     OK M0 bypasses token selection')
+
+    c.MODEL.HS_ENABLED = 1
+    c.MODEL.FACSS_ENABLED = 0
+    c.MODEL.HS_LAYERS = [1, 2, 3]
+    c.MODEL.HS_K = 2
+    hs_only = HSFACSS(dim=16, cfg=c).eval()
+    hs_out = _run_selector(hs_only, features, attentions)
+    assert not hasattr(hs_only, 'alpha_mlp')
+    assert not hasattr(hs_only, 'k_mlp')
+    for selected, mask in zip(hs_out[:3], hs_out[3]):
+        assert (mask.sum(dim=1) >= 2).all()
+        assert (mask.sum(dim=1) <= 6).all()
+        dropped = selected[:, 1:, :][~mask]
+        assert torch.count_nonzero(dropped) == 0
+    print('     OK M1 runs HS without FACSS parameters or cross-modal refinement')
+
+    c.MODEL.FACSS_ENABLED = 1
+    c.MODEL.HS_LAYERS = [1]
+    c.MODEL.HS_K = 8
+    c.MODEL.FACSS_DYNAMIC_K = 0
+    c.MODEL.FACSS_K = 2
+    c.MODEL.FACSS_SOFT_RESIDUAL_WEIGHT = 0.0
+    c.MODEL.FACSS_STE = 0
+    c.MODEL.FACSS_MODALITY_UNION = 0
+    facss = HSFACSS(dim=16, cfg=c).eval()
+    facss_out = _run_selector(facss, features, attentions)
+    assert hasattr(facss, 'alpha_mlp')
+    assert hasattr(facss, 'k_mlp')
+    for mask in facss_out[3]:
+        assert torch.equal(mask.sum(dim=1), torch.full((BATCH,), 2))
+    print('     OK M2 applies FACSS fixed-K refinement on HS candidates')
+
+    c.MODEL.HS_ENABLED = 0
+    try:
+        HSFACSS(dim=16, cfg=c)
+    except ValueError as exc:
+        assert 'requires MODEL.HS_ENABLED' in str(exc)
+    else:
+        raise AssertionError('FACSS without HS should fail configuration validation')
+    print('     OK invalid FACSS-without-HS configuration is rejected')
+
+
+def test_paper_model_modes():
+    print('[11] paper M0-M3 end-to-end train/eval smoke')
+    for row in PAPER_ROWS:
+        c = _make_paper_cfg(row)
+        c.MODEL.PRETRAIN_CHOICE = 'self'
+        c.MODEL.SIE_CAMERA = False
+        c.INPUT.SIZE_TRAIN = [128, 64]
+        c.INPUT.SIZE_TEST = [128, 64]
+        model = make_model(c, num_class=NUM_CLASSES, camera_num=0).cpu()
+
+        def frequency_must_not_run(*args, **kwargs):
+            raise AssertionError('paper configs must bypass the frequency branch')
+
+        model.FREQ_INDEX.forward = frequency_must_not_run
+        model.train()
+        x = _dummy_batch(c)
+        label = torch.randint(0, NUM_CLASSES, (BATCH,))
+        output = model(x, cam_label=None, label=label, epoch=0)
+        assert len(output) == 5, '{} expected 5 outputs, got {}'.format(row, len(output))
+        for i, value in enumerate(output):
+            _assert_finite(value, '{} output[{}]'.format(row, i))
+        _loss_assembly_like_processor(output).backward()
+
+        model.eval()
+        with torch.no_grad():
+            descriptor = model(x, cam_label=None, epoch=0)
+        assert descriptor.shape == (BATCH, 3 * model.BACKBONE.token_dim)
+        _assert_finite(descriptor, '{} descriptor'.format(row))
+        print('     OK {} train+bwd+eval'.format(row))
+
+
 def main():
     test_defaults_load()
     test_yml_configs_merge()
@@ -296,6 +462,9 @@ def main():
     test_part_descriptor_mode()
     test_save_load_roundtrip()
     test_ablation_switches()
+    test_paper_config_matrix()
+    test_hs_facss_modes()
+    test_paper_model_modes()
     print('\n=== ALL PIPELINE TESTS PASSED ===')
 
 

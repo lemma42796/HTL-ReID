@@ -9,14 +9,15 @@ from utils.logger import setup_logger
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="HTL-ReID Testing")
     parser.add_argument(
-        "--config_file", default="", help="path to config file", type=str
+        "--config_file", default=[], action='append', type=str,
+        help="path to config file; pass multiple times to chain merges"
     )
     parser.add_argument("opts", help="Modify config options using the command-line", default=None,
                         nargs=argparse.REMAINDER)
     args = parser.parse_args()
 
-    if args.config_file != "":
-        cfg.merge_from_file(args.config_file)
+    for config_path in args.config_file:
+        cfg.merge_from_file(config_path)
     cfg.merge_from_list(args.opts)
     cfg.freeze()
     output_dir = cfg.OUTPUT_DIR
@@ -26,9 +27,9 @@ if __name__ == "__main__":
     logger = setup_logger("HTL-ReID", output_dir, if_train=False)
     logger.info(args)
 
-    if args.config_file != "":
-        logger.info("Loaded configuration file {}".format(args.config_file))
-        with open(args.config_file, 'r') as cf:
+    for config_path in args.config_file:
+        logger.info("Loaded configuration file {}".format(config_path))
+        with open(config_path, 'r') as cf:
             config_str = "\n" + cf.read()
             logger.info(config_str)
     logger.info("Running with config:\n{}".format(cfg))
@@ -43,7 +44,8 @@ if __name__ == "__main__":
         raise ValueError(
             "cfg.TEST.WEIGHT is empty. Pass the trained checkpoint path via the "
             "yml config or CLI, e.g.:\n"
-            "    python test_net.py --config_file <yml> TEST.WEIGHT /path/to/ckpt.pth"
+            "    python test_net.py --config_file <base.yml> "
+            "--config_file <row.yml> TEST.WEIGHT /path/to/ckpt.pth"
         )
     model.load_param(cfg.TEST.WEIGHT)
     do_inference(cfg, model, val_loader, num_query)

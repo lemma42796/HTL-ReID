@@ -253,6 +253,7 @@ class HTLReID(nn.Module):
         self.feat_w = int(cfg.INPUT.SIZE_TRAIN[1] // cfg.MODEL.STRIDE_SIZE[1])
         self.num_patches = self.feat_h * self.feat_w
         self.HS_FACSS = HSFACSS(dim=self.BACKBONE.token_dim, cfg=cfg)
+        self.use_frequency = bool(cfg.MODEL.FREQUENCY_ENABLED)
         self.FREQ_INDEX = Frequency_based_Token_Selection(keep=cfg.MODEL.FREQUENCY_KEEP,
                                                           stride=cfg.MODEL.STRIDE_SIZE[0],
                                                           quality_aware=cfg.MODEL.FREQUENCY_QUALITY_AWARE)
@@ -540,6 +541,15 @@ class HTLReID(nn.Module):
             tir_feat = self.MODALITY_ADAPTERS['TIR'](tir_feat)
         return rgb_feat, nir_feat, tir_feat
 
+    def _frequency_mask(self, rgb, nir, tir=None, img_path=None, mode=1,
+                        writer=None, epoch=None, quality_scores=None):
+        if not self.use_frequency:
+            return None
+        return self.FREQ_INDEX(
+            x=rgb, y=nir, z=tir, img_path=img_path, mode=mode, writer=writer,
+            step=epoch, quality_scores=quality_scores,
+        )
+
     def _stripe_part_feature(self, rgb_feat, nir_feat, tir_feat, quality_scores=None):
         def modal_parts(feat, quality=None):
             B, _, C = feat.shape
@@ -733,8 +743,8 @@ class HTLReID(nn.Module):
             TIR_cls4tri = TIR_feat[:, 0, :]
             quality_scores = self.QUALITY_HEAD(RGB_cls4tri, NIR_cls4tri, TIR_cls4tri) \
                 if self.use_quality else None
-            mask_fre = self.FREQ_INDEX(x=RGB, y=NIR, z=TIR, img_path=img_path, mode=mode, writer=writer,
-                                       step=epoch, quality_scores=quality_scores)
+            mask_fre = self._frequency_mask(
+                RGB, NIR, TIR, img_path, mode, writer, epoch, quality_scores)
             if self.AL:
                 ori = torch.cat([RGB_cls4tri, NIR_cls4tri, TIR_cls4tri], dim=-1)
                 ori_score = self.AL_HEAD(self.AL_BN(ori))
@@ -800,8 +810,8 @@ class HTLReID(nn.Module):
             RGB_feat, NIR_feat, TIR_feat = self._adapt_features(RGB_feat, NIR_feat, TIR_feat)
             quality_scores = self.QUALITY_HEAD(RGB_feat[:, 0, :], NIR_feat[:, 0, :], TIR_feat[:, 0, :]) \
                 if self.use_quality else None
-            mask_fre = self.FREQ_INDEX(x=RGB, y=NIR, z=TIR, img_path=img_path, mode=mode, writer=writer,
-                                       step=epoch, quality_scores=quality_scores)
+            mask_fre = self._frequency_mask(
+                RGB, NIR, TIR, img_path, mode, writer, epoch, quality_scores)
 
             RGB_feat_s, NIR_feat_s, TIR_feat_s, mask = self.HS_FACSS(RGB_feat=RGB_feat,
                                                                      RGB_attn=RGB_attn,
@@ -840,8 +850,8 @@ class HTLReID(nn.Module):
             NIR_cls4tri = NIR_feat[:, 0, :]
             quality_scores = self.QUALITY_HEAD(RGB_cls4tri, NIR_cls4tri, None) \
                 if self.use_quality else None
-            mask_fre = self.FREQ_INDEX(x=RGB, y=NIR, z=None, img_path=img_path, mode=mode, writer=writer,
-                                       step=epoch, quality_scores=quality_scores)
+            mask_fre = self._frequency_mask(
+                RGB, NIR, None, img_path, mode, writer, epoch, quality_scores)
             # Here, you need to change the head for the AL setting to 2*token_dim
             if self.AL:
                 ori = torch.cat([RGB_cls4tri, NIR_cls4tri], dim=-1)
@@ -906,8 +916,8 @@ class HTLReID(nn.Module):
             RGB_feat, NIR_feat, _ = self._adapt_features(RGB_feat, NIR_feat, None)
             quality_scores = self.QUALITY_HEAD(RGB_feat[:, 0, :], NIR_feat[:, 0, :], None) \
                 if self.use_quality else None
-            mask_fre = self.FREQ_INDEX(x=RGB, y=NIR, z=None, img_path=img_path, mode=mode, writer=writer,
-                                       step=epoch, quality_scores=quality_scores)
+            mask_fre = self._frequency_mask(
+                RGB, NIR, None, img_path, mode, writer, epoch, quality_scores)
 
             RGB_feat_s, NIR_feat_s, mask = self.HS_FACSS(RGB_feat=RGB_feat,
                                                          RGB_attn=RGB_attn,

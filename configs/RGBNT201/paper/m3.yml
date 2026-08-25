@@ -1,0 +1,6 @@
+# M3: M2 + Quality-Aware Weighted Fusion (QAWF).
+MODEL:
+  HS_ENABLED: 1
+  FACSS_ENABLED: 1
+  QUALITY_AWARE: 1
+  SELECTED_PATCH_BLEND_WEIGHT: 0.15

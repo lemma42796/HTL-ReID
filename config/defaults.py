@@ -44,10 +44,13 @@ _C.MODEL.HEAD_KEEP = 1
 # The keep tokens in the Frequency Selection Part
 _C.MODEL.FREQUENCY_KEEP=10
 _C.MODEL.FREQUENCY_QUALITY_AWARE = 1
+_C.MODEL.FREQUENCY_ENABLED = 1
 # HS (Hierarchical Token Selection)
+_C.MODEL.HS_ENABLED = 1
 _C.MODEL.HS_LAYERS = [4, 8, 12]
 _C.MODEL.HS_K = 16
 # FACSS (Fusion-Aware Synergistic Selection)
+_C.MODEL.FACSS_ENABLED = 1
 _C.MODEL.FACSS_K = 16
 _C.MODEL.FACSS_DYNAMIC_K = 1
 _C.MODEL.FACSS_MIN_K = 8

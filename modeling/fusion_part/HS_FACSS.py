@@ -68,6 +68,10 @@ class HSFACSS(nn.Module):
     def __init__(self, dim, cfg):
         super().__init__()
         self.dim = dim
+        self.use_hs = bool(cfg.MODEL.HS_ENABLED)
+        self.use_facss = bool(cfg.MODEL.FACSS_ENABLED)
+        if self.use_facss and not self.use_hs:
+            raise ValueError("MODEL.FACSS_ENABLED requires MODEL.HS_ENABLED")
         self.hs = HierarchicalRollout(
             layers=tuple(cfg.MODEL.HS_LAYERS),
             k=cfg.MODEL.HS_K,
@@ -87,25 +91,26 @@ class HSFACSS(nn.Module):
         self.modality_union = bool(cfg.MODEL.FACSS_MODALITY_UNION)
         self.union_promote = bool(cfg.MODEL.FACSS_UNION_PROMOTE)
 
-        hidden = cfg.MODEL.FACSS_ALPHA_HIDDEN
-        in_dim = 3 * dim if self.alpha_grain == 'sample' else 4 * dim
-        self.alpha_mlp = nn.Sequential(
-            nn.LayerNorm(in_dim),
-            nn.Linear(in_dim, hidden),
-            nn.GELU(),
-            nn.Linear(hidden, 1),
-        )
-        nn.init.zeros_(self.alpha_mlp[-1].bias)         # initial alpha ~= 0.5
+        if self.use_facss:
+            hidden = cfg.MODEL.FACSS_ALPHA_HIDDEN
+            in_dim = 3 * dim if self.alpha_grain == 'sample' else 4 * dim
+            self.alpha_mlp = nn.Sequential(
+                nn.LayerNorm(in_dim),
+                nn.Linear(in_dim, hidden),
+                nn.GELU(),
+                nn.Linear(hidden, 1),
+            )
+            nn.init.zeros_(self.alpha_mlp[-1].bias)     # initial alpha ~= 0.5
 
-        k_hidden = cfg.MODEL.FACSS_K_HIDDEN
-        self.k_mlp = nn.Sequential(
-            nn.LayerNorm(4 * dim + 1),
-            nn.Linear(4 * dim + 1, k_hidden),
-            nn.GELU(),
-            nn.Linear(k_hidden, 1),
-        )
-        nn.init.zeros_(self.k_mlp[-1].weight)
-        nn.init.zeros_(self.k_mlp[-1].bias)
+            k_hidden = cfg.MODEL.FACSS_K_HIDDEN
+            self.k_mlp = nn.Sequential(
+                nn.LayerNorm(4 * dim + 1),
+                nn.Linear(4 * dim + 1, k_hidden),
+                nn.GELU(),
+                nn.Linear(k_hidden, 1),
+            )
+            nn.init.zeros_(self.k_mlp[-1].weight)
+            nn.init.zeros_(self.k_mlp[-1].bias)
 
     @staticmethod
     def _normalize(s, mode, mask=None, eps=1e-6):
@@ -251,10 +256,22 @@ class HSFACSS(nn.Module):
         patches = m_feat[:, 1:, :]                                 # [B, N, D]
         B, N, D = patches.shape
 
+        if not self.use_hs:
+            full_mask = torch.ones(B, N, dtype=torch.bool, device=patches.device)
+            return m_feat, full_mask
+
         hs_mask, s_self_full, _ = self.hs(m_attn)                  # both per modality
         cand_mask = hs_mask
         if mask_fre is not None:
             cand_mask = cand_mask | mask_fre.bool()
+
+        if not self.use_facss:
+            gate = cand_mask.to(dtype=patches.dtype)
+            feat_out = torch.cat(
+                [cls_token, patches * gate.unsqueeze(-1)],
+                dim=1,
+            )
+            return feat_out, cand_mask
 
         s_cross_full = self._cross_score(
             patches, others_full, others_quality=others_quality)   # [B, N]
@@ -344,7 +361,7 @@ class HSFACSS(nn.Module):
             outs[name] = feat_out
             masks[name] = sel_mask
 
-        if self.modality_union and len(masks) > 1:
+        if self.use_facss and self.modality_union and len(masks) > 1:
             shared_mask = None
             for sel_mask in masks.values():
                 shared_mask = sel_mask if shared_mask is None else (shared_mask | sel_mask)
