@@ -21,6 +21,7 @@ ROWS = (
     'configs/RGBNT201/fusion/t3_m2_facr.yml',
     'configs/RGBNT201/fusion/t4_facss_masked_facr.yml',
     'configs/RGBNT201/fusion/t5_sfts_masked_facr.yml',
+    'configs/RGBNT201/fusion/t6_sfts_learnable_k_facr.yml',
 )
 
 
@@ -67,6 +68,10 @@ def smoke(row, batch, height, width):
         ]
         if not score_parameters or not all(parameter.grad is not None for parameter in score_parameters):
             raise AssertionError('{} FACSS score networks did not receive gradients'.format(row))
+    if cfg.MODEL.SFTS_LEARNABLE_K:
+        k_logits = model.SFTS.k_logits
+        if k_logits.grad is None or not torch.isfinite(k_logits.grad).all():
+            raise AssertionError('{} learnable K did not receive finite gradients'.format(row))
     model.eval()
     with torch.no_grad():
         descriptor = model(inputs, epoch=0)

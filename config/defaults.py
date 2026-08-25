@@ -48,6 +48,15 @@ _C.MODEL.FREQUENCY_ENABLED = 1
 # Original EDITOR/Magic Tokens selector. When enabled it replaces HS/FACSS.
 _C.MODEL.SFTS_ENABLED = 0
 _C.MODEL.SFTS_RATIO = 0.5
+# Learn a dataset-level discrete tokens-per-head K with a straight-through
+# Gumbel-Softmax architecture choice. The final union density is regularized
+# so identification loss cannot trivially collapse the choice to maximum K.
+_C.MODEL.SFTS_LEARNABLE_K = 0
+_C.MODEL.SFTS_K_CANDIDATES = [1, 2, 4, 8, 16]
+_C.MODEL.SFTS_GUMBEL_TAU = 1.0
+_C.MODEL.SFTS_GUMBEL_TAU_MIN = 0.2
+_C.MODEL.SFTS_GUMBEL_TAU_DECAY = 0.9
+_C.MODEL.SFTS_BUDGET_LOSS_WEIGHT = 0.05
 # HS (Hierarchical Token Selection)
 _C.MODEL.HS_ENABLED = 1
 _C.MODEL.HS_LAYERS = [4, 8, 12]

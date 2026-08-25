@@ -261,7 +261,15 @@ class HTLReID(nn.Module):
         # retain exactly the same state-dict keys.
         self.HS_FACSS = HSFACSS(dim=self.BACKBONE.token_dim, cfg=cfg)
         if self.use_sfts:
-            self.SFTS = SFTS(ratio=cfg.MODEL.SFTS_RATIO)
+            self.SFTS = SFTS(
+                ratio=cfg.MODEL.SFTS_RATIO,
+                learnable_k=bool(cfg.MODEL.SFTS_LEARNABLE_K),
+                k_candidates=cfg.MODEL.SFTS_K_CANDIDATES,
+                gumbel_tau=cfg.MODEL.SFTS_GUMBEL_TAU,
+                gumbel_tau_min=cfg.MODEL.SFTS_GUMBEL_TAU_MIN,
+                gumbel_tau_decay=cfg.MODEL.SFTS_GUMBEL_TAU_DECAY,
+                budget_loss_weight=cfg.MODEL.SFTS_BUDGET_LOSS_WEIGHT,
+            )
         self.use_frequency = bool(cfg.MODEL.FREQUENCY_ENABLED)
         self.FREQ_INDEX = Frequency_based_Token_Selection(keep=cfg.MODEL.FREQUENCY_KEEP,
                                                           stride=cfg.MODEL.STRIDE_SIZE[0],
@@ -561,6 +569,11 @@ class HTLReID(nn.Module):
             return self.SFTS(**kwargs)
         return self.HS_FACSS(**kwargs)
 
+    def _selector_regularization(self, reference):
+        if not self.use_sfts:
+            return torch.zeros((), device=reference.device, dtype=reference.dtype)
+        return self.SFTS.regularization_loss(reference)
+
     def _agf_aux_pairs(self):
         if (not self.training) or (not self.use_agf) or (not self.agf_aux_supervision):
             return []
@@ -845,6 +858,7 @@ class HTLReID(nn.Module):
             loss_aux = loss_aux + self._auxiliary_losses(
                 RGB_feat, NIR_feat, TIR_feat, mask, quality_scores, has_tir=True)
             loss_aux = loss_aux + self._quality_dropout_loss(quality_scores, keep_mask)
+            loss_aux = loss_aux + self._selector_regularization(RGB_feat)
             score = self.FUSE_HEAD(self.FUSE_BN(cls4t))
             agf_aux_pairs = self._agf_aux_pairs()
             if self.use_part:
@@ -961,6 +975,7 @@ class HTLReID(nn.Module):
             loss_aux = loss_aux + self._auxiliary_losses(
                 RGB_feat, NIR_feat, TIR_feat_s, mask, quality_scores, has_tir=False)
             loss_aux = loss_aux + self._quality_dropout_loss(quality_scores, keep_mask)
+            loss_aux = loss_aux + self._selector_regularization(RGB_feat)
             score = self.FUSE_HEAD(self.FUSE_BN(cls4t))
             agf_aux_pairs = self._agf_aux_pairs()
             if self.use_part:
