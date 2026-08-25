@@ -26,6 +26,7 @@ Coverage:
  17. Optimized rollout, cross-score, dynamic-K, and frequency kernels preserve
      their reference outputs
  18. AdamW uses grouped multi-tensor parameter groups
+ 19. FACR route balancing is differentiable and disabled by default
 
 Run:
     python3 test_pipeline.py
@@ -39,7 +40,7 @@ from config import cfg as default_cfg
 from modeling.make_model import make_model
 from modeling.fusion_part.HS_FACSS import HSFACSS, HierarchicalRollout
 from modeling.fusion_part.Frequency import Frequency_based_Token_Selection
-from modeling.fusion_part.TPM import ScoreBiasedCrossAttention
+from modeling.fusion_part.TPM import FACR, ScoreBiasedCrossAttention
 from solver.make_optimizer import make_optimizer
 from solver.scheduler_factory import create_scheduler
 
@@ -601,8 +602,55 @@ def test_facr_score_bias_starts_from_t2():
         effective_gain))
 
 
+def test_facr_route_balance_loss():
+    print('[14] FACR batch-level route balance loss')
+    torch.manual_seed(19)
+    facr = FACR(
+        dim=16, num_heads=2, steps=2, score_bias_scale=0.0,
+        route_balance_weight=0.05).train()
+    with torch.no_grad():
+        for stage in facr.stages:
+            stage.route[-1].weight.normal_(mean=0.0, std=0.2)
+    feats = tuple(
+        torch.randn(4, 7, 16, requires_grad=True) for _ in range(3)
+    )
+    fused = facr(*feats)
+    balance_loss = facr.regularization_loss(fused)
+    assert balance_loss.item() > 0.0
+    balance_loss.backward()
+    route_grad = sum(
+        parameter.grad.abs().sum().item()
+        for stage in facr.stages
+        for parameter in stage.route.parameters()
+        if parameter.grad is not None
+    )
+    assert route_grad > 0.0
+    stats = facr.route_statistics()
+    assert set(stats) == {
+        'mean_entropy', 'mean_max_probability', 'mean_balance_deviation'
+    }
+    assert 0.0 <= stats['mean_max_probability'].item() <= 1.0
+    assert stats['mean_balance_deviation'].item() >= 0.0
+
+    disabled = FACR(dim=16, num_heads=2, steps=1, route_balance_weight=0.0)
+    disabled_out = disabled(*tuple(torch.randn(2, 7, 16) for _ in range(3)))
+    assert disabled.regularization_loss(disabled_out).item() == 0.0
+
+    cfg = default_cfg.clone()
+    cfg.merge_from_file(PAPER_BASE)
+    cfg.merge_from_file(
+        'configs/RGBNT201/fusion/t8_sfts_fixed_k16_route_balance.yml')
+    assert cfg.MODEL.SFTS_ENABLED
+    assert cfg.MODEL.FACR
+    assert cfg.MODEL.FACR_USE_MASKS
+    assert cfg.MODEL.FACR_ROUTE_BALANCE_WEIGHT == 0.05
+    assert cfg.MODEL.SFTS_RATIO == 0.05555555555555555
+    print('     OK loss={:.6f}; route_grad={:.6f}'.format(
+        balance_loss.item(), route_grad))
+
+
 def test_paper_model_modes():
-    print('[14] paper M0-M3 end-to-end train/eval smoke')
+    print('[15] paper M0-M3 end-to-end train/eval smoke')
     for row in PAPER_ROWS:
         c = _make_paper_cfg(row)
         c.MODEL.PRETRAIN_CHOICE = 'self'
@@ -633,7 +681,7 @@ def test_paper_model_modes():
 
 
 def test_legacy_a2_quality_frequency():
-    print('[15] legacy-style A2 quality-aware frequency path')
+    print('[16] legacy-style A2 quality-aware frequency path')
     c = _make_legacy_a2_cfg()
     assert c.MODEL.HS_ENABLED
     assert c.MODEL.FACSS_ENABLED
@@ -706,6 +754,7 @@ def main():
     test_optimized_kernels_equivalent()
     test_optimizer_parameter_groups()
     test_facr_score_bias_starts_from_t2()
+    test_facr_route_balance_loss()
     test_paper_model_modes()
     test_legacy_a2_quality_frequency()
     print('\n=== ALL PIPELINE TESTS PASSED ===')

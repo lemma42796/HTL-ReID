@@ -202,6 +202,7 @@ class AdaptiveRoutingStage(nn.Module):
         nn.init.zeros_(self.route[-1].bias)
         nn.init.zeros_(self.gate.weight)
         nn.init.constant_(self.gate.bias, float(gate_init_bias))
+        self._last_route_weights = None
 
     @staticmethod
     def _score_stats(scores, cls):
@@ -238,12 +239,15 @@ class AdaptiveRoutingStage(nn.Module):
         context = (context_stack * route_weight.unsqueeze(-1)).sum(dim=1)
         gate = torch.sigmoid(self.gate(torch.cat([target, context], dim=-1)))
         updated = target + gate * context
-        return updated + self.mlp(self.mlp_norm(updated))
+        return updated + self.mlp(self.mlp_norm(updated)), route_weight
 
     def forward(self, feats, scores=None, masks=None):
-        updated = [
+        updated_and_routes = [
             self._update_one(i, feats, scores, masks) for i in range(3)
         ]
+        updated = [item[0] for item in updated_and_routes]
+        self._last_route_weights = torch.stack(
+            [item[1] for item in updated_and_routes], dim=1)
         return tuple(
             self._replace_cls(feat, cls)
             for feat, cls in zip(feats, updated)
@@ -259,8 +263,12 @@ class FACR(nn.Module):
     """
 
     def __init__(self, dim, num_heads=12, steps=3, score_bias_scale=0.25,
-                 score_floor=0.05, detach_scores=True, gate_init_bias=0.0):
+                 score_floor=0.05, detach_scores=True, gate_init_bias=0.0,
+                 route_balance_weight=0.0):
         super().__init__()
+        self.route_balance_weight = float(route_balance_weight)
+        if self.route_balance_weight < 0.0:
+            raise ValueError('FACR route balance weight must be non-negative')
         self.stages = nn.ModuleList([
             AdaptiveRoutingStage(
                 dim, num_heads=num_heads,
@@ -286,4 +294,41 @@ class FACR(nn.Module):
         feats = (rgb, nir, tir)
         for stage in self.stages:
             feats = stage(feats, scores=scores, masks=masks)
+            if self.route_balance_weight == 0.0:
+                stage._last_route_weights = stage._last_route_weights.detach()
         return torch.cat([feat[:, 0, :] for feat in feats], dim=-1)
+
+    def regularization_loss(self, reference):
+        """Prevent batch-level source starvation while preserving per-sample routing."""
+        if self.route_balance_weight == 0.0:
+            return torch.zeros((), device=reference.device, dtype=reference.dtype)
+        route_weights = [
+            stage._last_route_weights for stage in self.stages
+            if stage._last_route_weights is not None
+        ]
+        if not route_weights:
+            return torch.zeros((), device=reference.device, dtype=reference.dtype)
+        losses = []
+        for weights in route_weights:
+            mean_route = weights.float().mean(dim=0)
+            losses.append((mean_route - 0.5).pow(2).mean())
+        loss = torch.stack(losses).mean().to(dtype=reference.dtype)
+        return self.route_balance_weight * loss
+
+    def route_statistics(self):
+        """Return detached aggregate diagnostics for the latest forward pass."""
+        route_weights = [
+            stage._last_route_weights.detach().float() for stage in self.stages
+            if stage._last_route_weights is not None
+        ]
+        if not route_weights:
+            return {}
+        weights = torch.stack(route_weights, dim=0)
+        entropy = -(weights.clamp_min(1e-8) * weights.clamp_min(1e-8).log())
+        return {
+            'mean_entropy': entropy.sum(dim=-1).mean(),
+            'mean_max_probability': weights.amax(dim=-1).mean(),
+            'mean_balance_deviation': (
+                weights.mean(dim=1) - 0.5
+            ).abs().mean(),
+        }

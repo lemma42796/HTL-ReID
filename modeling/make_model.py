@@ -279,6 +279,7 @@ class HTLReID(nn.Module):
         self.use_facr = bool(cfg.MODEL.FACR)
         self.facr_use_scores = bool(cfg.MODEL.FACR_USE_SCORES)
         self.facr_use_masks = bool(cfg.MODEL.FACR_USE_MASKS)
+        self._last_facr_stats_epoch = None
         if sum((self.use_agf, self.use_tpm, self.use_facr)) > 1:
             raise ValueError('MODEL.AGF, MODEL.TPM, and MODEL.FACR are mutually exclusive')
         if self.use_facr and self.facr_use_scores and not bool(cfg.MODEL.FACSS_ENABLED):
@@ -351,6 +352,7 @@ class HTLReID(nn.Module):
                 score_floor=cfg.MODEL.FACR_SCORE_FLOOR,
                 detach_scores=bool(cfg.MODEL.FACR_DETACH_SCORES),
                 gate_init_bias=cfg.MODEL.FACR_GATE_INIT_BIAS,
+                route_balance_weight=cfg.MODEL.FACR_ROUTE_BALANCE_WEIGHT,
             )
         if self.use_agf:
             self.AGF = AGF(dim=self.BACKBONE.token_dim,
@@ -573,6 +575,19 @@ class HTLReID(nn.Module):
         if not self.use_sfts:
             return torch.zeros((), device=reference.device, dtype=reference.dtype)
         return self.SFTS.regularization_loss(reference)
+
+    def _facr_regularization(self, reference):
+        if not self.use_facr:
+            return torch.zeros((), device=reference.device, dtype=reference.dtype)
+        return self.FACR.regularization_loss(reference)
+
+    def _log_facr_statistics(self, writer, epoch):
+        if (not self.use_facr or writer is None or epoch is None or
+                self._last_facr_stats_epoch == int(epoch)):
+            return
+        for name, value in self.FACR.route_statistics().items():
+            writer.add_scalar('FACR/{}'.format(name), value.item(), epoch)
+        self._last_facr_stats_epoch = int(epoch)
 
     def _agf_aux_pairs(self):
         if (not self.training) or (not self.use_agf) or (not self.agf_aux_supervision):
@@ -859,6 +874,8 @@ class HTLReID(nn.Module):
                 RGB_feat, NIR_feat, TIR_feat, mask, quality_scores, has_tir=True)
             loss_aux = loss_aux + self._quality_dropout_loss(quality_scores, keep_mask)
             loss_aux = loss_aux + self._selector_regularization(RGB_feat)
+            loss_aux = loss_aux + self._facr_regularization(RGB_feat)
+            self._log_facr_statistics(writer, epoch)
             score = self.FUSE_HEAD(self.FUSE_BN(cls4t))
             agf_aux_pairs = self._agf_aux_pairs()
             if self.use_part:

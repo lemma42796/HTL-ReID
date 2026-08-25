@@ -111,6 +111,9 @@ _C.MODEL.FACR_SCORE_BIAS_SCALE = 0.25
 _C.MODEL.FACR_SCORE_FLOOR = 0.05
 _C.MODEL.FACR_DETACH_SCORES = 1
 _C.MODEL.FACR_GATE_INIT_BIAS = 0.0
+# Batch-level load balancing for FACR. It keeps both candidate source
+# modalities used across a batch without forcing every sample to route 50/50.
+_C.MODEL.FACR_ROUTE_BALANCE_WEIGHT = 0.0
 # OCFR auxiliary loss (not in paper); off by default for paper-faithful reproduction
 _C.MODEL.OCFR = 0
 # Ablation switches (1=enable, 0=disable)
