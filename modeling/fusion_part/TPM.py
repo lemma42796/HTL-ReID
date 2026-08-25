@@ -15,7 +15,7 @@ from ..backbones.vit_pytorch import DropPath, Mlp, trunc_normal_
 class ScoreBiasedCrossAttention(nn.Module):
     """Class-token query over a source modality's complete patch sequence."""
 
-    def __init__(self, dim, num_heads=12, score_bias_scale=1.0,
+    def __init__(self, dim, num_heads=12, score_bias_scale=0.25,
                  score_floor=0.05, detach_scores=True, qkv_bias=False, attn_drop=0.0,
                  proj_drop=0.0):
         super().__init__()
@@ -25,9 +25,15 @@ class ScoreBiasedCrossAttention(nn.Module):
         self.head_dim = dim // self.num_heads
         self.scale = self.head_dim ** -0.5
         self.score_bias_scale = float(score_bias_scale)
+        if self.score_bias_scale < 0.0:
+            raise ValueError('score_bias_scale must be non-negative')
         self.score_floor = float(score_floor)
-        if not 0.0 < self.score_floor <= 1.0:
-            raise ValueError('score_floor must be in (0, 1]')
+        if not 0.0 <= self.score_floor < 1.0:
+            raise ValueError('score_floor must be in [0, 1)')
+        # Start exactly from score-free FACR (T2). The bounded gain can only
+        # introduce FACSS guidance gradually when the identification objective
+        # finds it useful.
+        self.score_bias_gain = nn.Parameter(torch.zeros(()))
         self.detach_scores = bool(detach_scores)
         self.source_norm = nn.LayerNorm(dim)
         self.q = nn.Linear(dim, dim, bias=qkv_bias)
@@ -62,11 +68,13 @@ class ScoreBiasedCrossAttention(nn.Module):
             if self.detach_scores:
                 scores = scores.detach()
             scores = self._normalize_scores(scores.to(dtype=logits.dtype))
-            # A positive floor keeps every patch visible. FACSS guides rather
-            # than recreating the old hard-pruning behavior inside attention.
-            scores = self.score_floor + (1.0 - self.score_floor) * scores
-            bias = torch.log(scores)
-            logits = logits + self.score_bias_scale * bias[:, None, None, :]
+            # Centered, bounded residual guidance replaces the former log
+            # prior, which imposed up to a 20x attention ratio at every stage.
+            scores = (scores - self.score_floor).clamp_min(0.0)
+            scores = scores / (1.0 - self.score_floor)
+            bias = 2.0 * scores - 1.0
+            gain = self.score_bias_scale * torch.tanh(self.score_bias_gain)
+            logits = logits + gain * bias[:, None, None, :]
 
         attention = self.attn_drop(logits.softmax(dim=-1))
         context = torch.matmul(attention, v).transpose(1, 2).reshape(batch, dim)
@@ -158,8 +166,7 @@ class AdaptiveRoutingStage(nn.Module):
     """All-connected, sample-adaptive cross-modal class-token update."""
 
     def __init__(self, dim, num_heads, score_bias_scale, score_floor,
-                 detach_scores,
-                 gate_init_bias=0.0):
+                 detach_scores, gate_init_bias=0.0):
         super().__init__()
         self.query_norm = nn.LayerNorm(dim)
         self.attn = ScoreBiasedCrossAttention(
@@ -232,7 +239,7 @@ class FACR(nn.Module):
     per-channel residual gate control source and injection strength per sample.
     """
 
-    def __init__(self, dim, num_heads=12, steps=3, score_bias_scale=1.0,
+    def __init__(self, dim, num_heads=12, steps=3, score_bias_scale=0.25,
                  score_floor=0.05, detach_scores=True, gate_init_bias=0.0):
         super().__init__()
         self.stages = nn.ModuleList([

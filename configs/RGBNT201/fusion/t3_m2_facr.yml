@@ -12,7 +12,9 @@ MODEL:
   FACR_USE_SCORES: 1
   FACR_NUM_HEADS: 12
   FACR_STEPS: 3
-  FACR_SCORE_BIAS_SCALE: 1.0
+  # Zero-initialized learnable gain, bounded to +/-0.25. T3 therefore starts
+  # exactly from T2 instead of imposing the former 20x log-score prior.
+  FACR_SCORE_BIAS_SCALE: 0.25
   FACR_SCORE_FLOOR: 0.05
   # End-to-end score learning is required because the legacy 0.15 descriptor
   # branch is disabled; detaching here would leave FACSS alpha untrained.

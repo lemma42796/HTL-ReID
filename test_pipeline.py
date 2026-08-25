@@ -39,6 +39,7 @@ from config import cfg as default_cfg
 from modeling.make_model import make_model
 from modeling.fusion_part.HS_FACSS import HSFACSS, HierarchicalRollout
 from modeling.fusion_part.Frequency import Frequency_based_Token_Selection
+from modeling.fusion_part.TPM import ScoreBiasedCrossAttention
 from solver.make_optimizer import make_optimizer
 from solver.scheduler_factory import create_scheduler
 
@@ -548,8 +549,35 @@ def test_optimizer_parameter_groups():
     print('     OK {} tensors -> {} optimizer groups'.format(tensor_count, grouped_count))
 
 
+def test_facr_score_bias_starts_from_t2():
+    print('[13] FACR score bias is zero-initialized and bounded')
+    torch.manual_seed(11)
+    attention = ScoreBiasedCrossAttention(
+        dim=16, num_heads=2, score_bias_scale=0.25,
+        detach_scores=False).eval()
+    query = torch.randn(2, 16)
+    source = torch.randn(2, 6, 16)
+    scores = torch.rand(2, 6)
+
+    without_scores = attention(query, source)
+    with_scores = attention(query, source, scores=scores)
+    assert torch.allclose(without_scores, with_scores, atol=1e-7, rtol=0.0)
+    assert attention.score_bias_gain.item() == 0.0
+
+    with torch.no_grad():
+        attention.score_bias_gain.fill_(10.0)
+    guided = attention(query, source, scores=scores)
+    assert not torch.allclose(without_scores, guided)
+    effective_gain = (
+        attention.score_bias_scale * torch.tanh(attention.score_bias_gain)
+    ).abs().item()
+    assert effective_gain <= 0.25
+    print('     OK initial output=T2; learned guidance bounded at {:.3f}'.format(
+        effective_gain))
+
+
 def test_paper_model_modes():
-    print('[13] paper M0-M3 end-to-end train/eval smoke')
+    print('[14] paper M0-M3 end-to-end train/eval smoke')
     for row in PAPER_ROWS:
         c = _make_paper_cfg(row)
         c.MODEL.PRETRAIN_CHOICE = 'self'
@@ -580,7 +608,7 @@ def test_paper_model_modes():
 
 
 def test_legacy_a2_quality_frequency():
-    print('[14] legacy-style A2 quality-aware frequency path')
+    print('[15] legacy-style A2 quality-aware frequency path')
     c = _make_legacy_a2_cfg()
     assert c.MODEL.HS_ENABLED
     assert c.MODEL.FACSS_ENABLED
@@ -652,6 +680,7 @@ def main():
     test_hs_facss_modes()
     test_optimized_kernels_equivalent()
     test_optimizer_parameter_groups()
+    test_facr_score_bias_starts_from_t2()
     test_paper_model_modes()
     test_legacy_a2_quality_frequency()
     print('\n=== ALL PIPELINE TESTS PASSED ===')

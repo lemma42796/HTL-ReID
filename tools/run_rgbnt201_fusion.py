@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run T1, T2, and T3 fusion rows sequentially with independent 30m caps."""
+"""Run the T1-T3 batch or one registered RGBNT201 fusion experiment."""
 
 import argparse
 import csv
@@ -101,8 +101,9 @@ def write_summary(path, results):
         writer.writerows(results)
 
 
-def run_row(args, timeout_bin, commit, experiment, row, row_config):
-    output_dir = args.output_root / OUTPUT_NAMES[row]
+def run_row(args, timeout_bin, commit, experiment, row, row_config,
+            output_name=None):
+    output_dir = args.output_root / (output_name or OUTPUT_NAMES[row])
     output_dir.mkdir(parents=True)
     cfg = resolve_config(row_config, output_dir)
     output_dir.joinpath("resolved_config.yml").write_text(cfg.dump(), encoding="utf-8")
@@ -159,13 +160,29 @@ def main():
         "--output-root", type=Path,
         default=Path("/root/autodl-tmp/outputs/HTL-ReID"))
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--single-experiment")
+    parser.add_argument("--single-row")
+    parser.add_argument("--single-config")
+    parser.add_argument("--single-output-name")
     args = parser.parse_args()
     args.repo_root = args.repo_root.resolve()
     args.output_root = args.output_root.resolve()
 
+    single_values = (
+        args.single_experiment, args.single_row,
+        args.single_config, args.single_output_name,
+    )
+    if any(single_values) and not all(single_values):
+        parser.error("all --single-* arguments must be provided together")
+    rows = ROWS
+    output_names = dict(OUTPUT_NAMES)
+    if all(single_values):
+        rows = ((args.single_experiment, args.single_row, args.single_config),)
+        output_names[args.single_row] = args.single_output_name
+
     plan = []
-    for experiment, row, row_config in ROWS:
-        output_dir = args.output_root / OUTPUT_NAMES[row]
+    for experiment, row, row_config in rows:
+        output_dir = args.output_root / output_names[row]
         resolve_config(row_config, output_dir)
         plan.append({
             "experiment": experiment,
@@ -197,6 +214,13 @@ def main():
 
     commit = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=args.repo_root, text=True).strip()
+    if all(single_values):
+        experiment, row, row_config = rows[0]
+        result = run_row(
+            args, timeout_bin, commit, experiment, row, row_config,
+            output_name=output_names[row])
+        return 0 if result["status"] == "completed" else 1
+
     stamp = dt.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     run_dir = args.output_root / "fusion_E006-E008_{}".format(stamp)
     run_dir.mkdir(parents=True)
@@ -205,7 +229,7 @@ def main():
     run_dir.joinpath("commit.txt").write_text(commit + "\n", encoding="utf-8")
 
     results = []
-    for experiment, row, row_config in ROWS:
+    for experiment, row, row_config in rows:
         results.append(run_row(
             args, timeout_bin, commit, experiment, row, row_config))
         write_summary(run_dir / "summary.csv", results)
