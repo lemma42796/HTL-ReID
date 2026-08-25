@@ -38,9 +38,10 @@ python train_net.py --config_file configs/RGBNT201/paper/base.yml \
     MODEL.PRETRAIN_PATH_T /path/to/pretrained_vit.pth
 ```
 
-The formal paper protocol trains for the full 120-epoch schedule. It uses
-batch size 40, seed 1111, and disables periodic checkpoints while retaining the
-best checkpoint.
+The controlled paper protocol trains for 20 epochs while retaining the
+120-epoch cosine-schedule horizon. It uses batch size 40, seed 1111, disables
+periodic checkpoints while retaining the best checkpoint, and must be launched
+with a 30-minute wall-clock timeout.
 
 ## Evaluation
 

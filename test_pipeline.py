@@ -337,7 +337,7 @@ def test_paper_config_matrix():
         assert c.SOLVER.SEED == 1111
         assert c.SOLVER.IMS_PER_BATCH == 40
         assert c.SOLVER.MAX_EPOCHS == 120
-        assert c.SOLVER.TRAIN_EPOCHS == 0
+        assert c.SOLVER.TRAIN_EPOCHS == 20
         c.freeze()
         print('     OK {}  HS={} FACSS={} QAWF={}'.format(
             row, actual[0], actual[1], actual[2]))
