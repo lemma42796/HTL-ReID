@@ -53,6 +53,18 @@ python test_net.py --config_file configs/RGBNT201/paper/base.yml \
 
 The paper configs explicitly disable re-ranking for the main results.
 
+## Remaining controlled rows
+
+After E001/M0 has completed, run M1-M3 sequentially with independent
+initialization and a separate 30-minute cap per row:
+
+```bash
+python tools/run_rgbnt201_paper_remaining.py
+```
+
+Use `--dry-run` to inspect the experiment IDs, configs, output directories,
+epoch count, seed, and timeout without creating artifacts or starting training.
+
 ## Smoke Test
 
 ```bash
