@@ -70,8 +70,10 @@ def smoke(row, batch, height, width):
             raise AssertionError('{} FACSS score networks did not receive gradients'.format(row))
     if cfg.MODEL.SFTS_LEARNABLE_K:
         k_logits = model.SFTS.k_logits
-        if k_logits.grad is None or not torch.isfinite(k_logits.grad).all():
-            raise AssertionError('{} learnable K did not receive finite gradients'.format(row))
+        if (k_logits.grad is None or not torch.isfinite(k_logits.grad).all() or
+                k_logits.grad.abs().sum() == 0):
+            raise AssertionError(
+                '{} learnable K did not receive finite non-zero gradients'.format(row))
     model.eval()
     with torch.no_grad():
         descriptor = model(inputs, epoch=0)
