@@ -694,11 +694,10 @@ class HTLReID(nn.Module):
             return torch.zeros((), device=device)
         width = keep_mask.size(1)
         dropped = (~keep_mask).to(dtype=quality_scores.dtype)
-        if dropped.sum().item() <= 0:
-            return torch.zeros((), device=quality_scores.device)
         quality = quality_scores[:, :width]
         target = torch.full_like(quality, self.quality_min_score)
-        loss = ((quality - target) ** 2 * dropped).sum() / dropped.sum().clamp_min(1.0)
+        dropped_count = dropped.sum()
+        loss = ((quality - target) ** 2 * dropped).sum() / dropped_count.clamp_min(1.0)
         return self.quality_perturb_loss_weight * loss
 
     def load_param(self, trained_path):

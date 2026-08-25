@@ -245,8 +245,8 @@ _C.SOLVER.SAVE_BEST_CHECKPOINT = True
 _C.SOLVER.SAVE_PERIODIC_CHECKPOINTS = False
 # iteration of display training log
 _C.SOLVER.LOG_PERIOD = 10
-# epoch number of validation
-_C.SOLVER.EVAL_PERIOD = 1
+# Validate periodically; processor.py always validates the final run epoch.
+_C.SOLVER.EVAL_PERIOD = 5
 _C.SOLVER.KL = 0
 # Number of images per batch
 # This is global, so if we have 8 GPUs and IMS_PER_BATCH = 16, each GPU will

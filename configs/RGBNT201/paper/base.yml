@@ -77,7 +77,9 @@ SOLVER:
   # so the run completes inside the mandatory 30-minute wall-clock cap.
   TRAIN_EPOCHS: 20
   SEED: 1111
-  EVAL_PERIOD: 1
+  # Validation is relatively expensive; the trainer still always evaluates
+  # the final epoch even when it is not divisible by this period.
+  EVAL_PERIOD: 5
   SAVE_BEST_CHECKPOINT: True
   SAVE_PERIODIC_CHECKPOINTS: False
 

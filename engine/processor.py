@@ -131,19 +131,18 @@ def do_train(cfg,
             if not scheduler_in_epochs:
                 num_updates = (epoch - 1) * updates_per_epoch + n_iter
                 scheduler.step_update(num_updates)
-            optimizer.zero_grad()
-            optimizer_center.zero_grad()
-            img = {'RGB': img['RGB'].to(device),
-                   'NI': img['NI'].to(device),
-                   'TI': img['TI'].to(device)}
-            target = vid.to(device)
-            target_cam = target_cam.to(device)
-            target_view = target_view.to(device)
+            optimizer.zero_grad(set_to_none=True)
+            optimizer_center.zero_grad(set_to_none=True)
+            img = {'RGB': img['RGB'].to(device, non_blocking=True),
+                   'NI': img['NI'].to(device, non_blocking=True),
+                   'TI': img['TI'].to(device, non_blocking=True)}
+            target = vid.to(device, non_blocking=True)
+            target_cam = target_cam.to(device, non_blocking=True)
+            target_view = target_view.to(device, non_blocking=True)
             with amp.autocast(enabled=True):
                 output = model(img, label=target, cam_label=target_cam, view_label=target_view, img_path=imgpath,
                                writer=writer, epoch=epoch)
                 loss = _compute_train_loss(cfg, output, loss_fn, target, target_cam, epoch)
-            writer.add_scalar('Loss', loss.item(), epoch)
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
@@ -154,16 +153,23 @@ def do_train(cfg,
             else:
                 acc = (output[0].max(1)[1] == target).float().mean()
 
-            loss_meter.update(loss.item(), img['RGB'].shape[0])
-            acc_meter.update(acc, 1)
+            loss_meter.update(loss.detach(), img['RGB'].shape[0])
+            acc_meter.update(acc.detach(), 1)
 
-            torch.cuda.synchronize()
             if (n_iter + 1) % log_period == 0:
-                # print(scheduler._get_lr(epoch))
+                # One host synchronization per logging interval instead of
+                # multiple loss.item()/cuda.synchronize calls per iteration.
+                loss_avg, acc_avg = torch.stack([
+                    loss_meter.avg.float(), acc_meter.avg.float()
+                ]).cpu().tolist()
+                global_step = (epoch - 1) * updates_per_epoch + n_iter + 1
+                writer.add_scalar('Loss/train', loss_avg, global_step)
                 logger.info("Epoch[{}] Iteration[{}/{}] Loss: {:.3f}, Acc: {:.3f}, Base Lr: {:.2e}"
                             .format(epoch, (n_iter + 1), len(train_loader),
-                                    loss_meter.avg, acc_meter.avg, optimizer.param_groups[0]['lr']))
+                                    loss_avg, acc_avg, optimizer.param_groups[0]['lr']))
 
+        # Synchronize once so epoch throughput includes all queued GPU work.
+        torch.cuda.synchronize()
         end_time = time.time()
         time_per_batch = (end_time - start_time) / (n_iter + 1)
 
@@ -179,7 +185,8 @@ def do_train(cfg,
                 torch.save(model.state_dict(),
                            os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + '_{}.pth'.format(epoch)))
 
-        if epoch % eval_period == 0:
+        should_eval = (eval_period > 0 and epoch % eval_period == 0) or epoch == run_epochs
+        if should_eval:
             if cfg.MODEL.DIST_TRAIN:
                 if dist.get_rank() == 0:
                     model.eval()
@@ -187,11 +194,11 @@ def do_train(cfg,
                     print('!!!Mutil-Modal Testing!!!')
                     for n_iter, (img, vid, camid, camids, target_view, _) in enumerate(val_loader):
                         with torch.no_grad():
-                            img = {'RGB': img['RGB'].to(device),
-                                   'NI': img['NI'].to(device),
-                                   'TI': img['TI'].to(device)}
-                            camids = camids.to(device)
-                            target_view = target_view.to(device)
+                            img = {'RGB': img['RGB'].to(device, non_blocking=True),
+                                   'NI': img['NI'].to(device, non_blocking=True),
+                                   'TI': img['TI'].to(device, non_blocking=True)}
+                            camids = camids.to(device, non_blocking=True)
+                            target_view = target_view.to(device, non_blocking=True)
                             feat = model(img, cam_label=camids, view_label=target_view, mode=1, img_path=_)
                             if cfg.DATASETS.NAMES == "MSVR310":
                                 evaluator_m.update((feat, vid, camid, target_view, _))
@@ -217,7 +224,6 @@ def do_train(cfg,
                     logger.info("Best Multi-Modal Rank-5: {:.2%}".format(best_index['Rank-5']))
                     logger.info("Best Multi-Modal Rank-10: {:.2%}".format(best_index['Rank-10']))
                     print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
-                    torch.cuda.empty_cache()
 
             else:
                 model.eval()
@@ -225,11 +231,11 @@ def do_train(cfg,
                 print('!!!Mutil-Modal Testing!!!')
                 for n_iter, (img, vid, camid, camids, target_view, _) in enumerate(val_loader):
                     with torch.no_grad():
-                        img = {'RGB': img['RGB'].to(device),
-                               'NI': img['NI'].to(device),
-                               'TI': img['TI'].to(device)}
-                        camids = camids.to(device)
-                        target_view = target_view.to(device)
+                        img = {'RGB': img['RGB'].to(device, non_blocking=True),
+                               'NI': img['NI'].to(device, non_blocking=True),
+                               'TI': img['TI'].to(device, non_blocking=True)}
+                        camids = camids.to(device, non_blocking=True)
+                        target_view = target_view.to(device, non_blocking=True)
                         feat = model(img, cam_label=camids, view_label=target_view, mode=1, img_path=_)
                         if cfg.DATASETS.NAMES == "MSVR310":
                             evaluator_m.update((feat, vid, camid, target_view, _))
@@ -256,7 +262,6 @@ def do_train(cfg,
                 logger.info("Best Multi-Modal Rank-10: {:.2%}".format(best_index['Rank-10']))
                 print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
 
-                torch.cuda.empty_cache()
 
 
     writer.close()
@@ -282,11 +287,11 @@ def do_inference(cfg,
             print('!!!Mutil-Modal Testing!!!')
             for n_iter, (img, vid, camid, camids, target_view, _) in enumerate(val_loader):
                 with torch.no_grad():
-                    img = {'RGB': img['RGB'].to(device),
-                           'NI': img['NI'].to(device),
-                           'TI': img['TI'].to(device)}
-                    camids = camids.to(device)
-                    target_view = target_view.to(device)
+                    img = {'RGB': img['RGB'].to(device, non_blocking=True),
+                           'NI': img['NI'].to(device, non_blocking=True),
+                           'TI': img['TI'].to(device, non_blocking=True)}
+                    camids = camids.to(device, non_blocking=True)
+                    target_view = target_view.to(device, non_blocking=True)
                     feat = model(img, cam_label=camids, view_label=target_view, mode=1, img_path=_)
                     if cfg.DATASETS.NAMES == "MSVR310":
                         evaluator_m.update((feat, vid, camid, target_view, _))
@@ -294,7 +299,6 @@ def do_inference(cfg,
                         evaluator_m.update((feat, vid, camid))
 
 
-            torch.cuda.empty_cache()
             cmc, mAP, _, _, _, _, _ = evaluator_m.compute(cfg)
             _log_eval_results(logger, cmc, mAP)
 
@@ -304,17 +308,16 @@ def do_inference(cfg,
         print('!!!Mutil-Modal Testing!!!')
         for n_iter, (img, vid, camid, camids, target_view, _) in enumerate(val_loader):
             with torch.no_grad():
-                img = {'RGB': img['RGB'].to(device),
-                       'NI': img['NI'].to(device),
-                       'TI': img['TI'].to(device)}
-                camids = camids.to(device)
-                target_view = target_view.to(device)
+                img = {'RGB': img['RGB'].to(device, non_blocking=True),
+                       'NI': img['NI'].to(device, non_blocking=True),
+                       'TI': img['TI'].to(device, non_blocking=True)}
+                camids = camids.to(device, non_blocking=True)
+                target_view = target_view.to(device, non_blocking=True)
                 feat = model(img, cam_label=camids, view_label=target_view, mode=1, img_path=_)
                 if cfg.DATASETS.NAMES == "MSVR310":
                     evaluator_m.update((feat, vid, camid, target_view, _))
                 else:
                     evaluator_m.update((feat, vid, camid))
 
-        torch.cuda.empty_cache()
         cmc, mAP, _, _, _, _, _ = evaluator_m.compute(cfg)
         _log_eval_results(logger, cmc, mAP)

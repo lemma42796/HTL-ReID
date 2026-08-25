@@ -40,27 +40,20 @@ class Frequency_based_Token_Selection(nn.Module):
                 writer.add_figure('FREQUENCY_Before', fig, global_step=epoch)
 
     
-    def mask(self, Inverse,window_size=16):
-        batch_size, height, width = Inverse.size(0), Inverse.size(-2), Inverse.size(-1)
+    def mask(self, Inverse, window_size=16):
+        batch_size = Inverse.size(0)
         Inverse = torch.mean(Inverse, dim=1)
-        # create a tensor to store the count of non-zero elements
-        count_tensor = torch.zeros((batch_size, height //self.stride, width // self.stride),
-                                   dtype=torch.int, device=Inverse.device)
-        # For each image in the batch
-        for batch_idx in range(batch_size):
-            image = Inverse[batch_idx]  # 获取当前图像
-            # With a sliding window, unfold the image into a tensor
-            unfolded = F.unfold(image.unsqueeze(0).unsqueeze(0), window_size, stride=self.stride)
-            # Turns elements greater than 0 into binary, then sums to count the number of elements greater than 0
-            count = unfolded.gt(0).sum(1)
-            count = count.view(height // self.stride, width // self.stride)
-            count_tensor[batch_idx] = count
-            # Get the index of the maximum value of each image
-        _, topk_indices = torch.topk(count_tensor.flatten(1), int(self.keep), dim=1)
-        topk_indices = torch.sort(topk_indices, dim=1).values
-        selected_tokens_mask = torch.zeros((batch_size, (height // self.stride) * (width // self.stride)),
-                                           dtype=torch.bool, device=Inverse.device)
-        selected_tokens_mask.scatter_(1, topk_indices, 1)
+        # F.unfold accepts the complete [B, C, H, W] tensor. The former
+        # per-image Python loop launched one kernel per sample.
+        unfolded = F.unfold(
+            Inverse.unsqueeze(1), kernel_size=window_size, stride=self.stride
+        )
+        count = unfolded.gt(0).sum(dim=1)                          # [B, patches]
+        topk_indices = count.topk(min(int(self.keep), count.size(1)), dim=1).indices
+        selected_tokens_mask = torch.zeros(
+            (batch_size, count.size(1)), dtype=torch.bool, device=Inverse.device
+        )
+        selected_tokens_mask.scatter_(1, topk_indices, True)
         return selected_tokens_mask
 
     def _modal_weights(self, tensors, quality_scores=None):
@@ -81,6 +74,7 @@ class Frequency_based_Token_Selection(nn.Module):
             out = out + tensor * weights[:, i].view(*view_shape)
         return out
 
+    @torch.no_grad()
     def forward(self, x, y, z, img_path, pattern='a', mode=None, writer=None,
                 step=None, quality_scores=None):
         Ylx, Yhx = self.DWT(x)

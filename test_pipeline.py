@@ -23,6 +23,9 @@ Coverage:
  14. M0 bypass, HS-only, and HS+FACSS selection paths behave distinctly
  15. Every paper row completes an end-to-end train/eval smoke pass
  16. The legacy-style A2 config runs quality-aware frequency selection
+ 17. Optimized rollout, cross-score, dynamic-K, and frequency kernels preserve
+     their reference outputs
+ 18. AdamW uses grouped multi-tensor parameter groups
 
 Run:
     python3 test_pipeline.py
@@ -34,7 +37,9 @@ import torch
 
 from config import cfg as default_cfg
 from modeling.make_model import make_model
-from modeling.fusion_part.HS_FACSS import HSFACSS
+from modeling.fusion_part.HS_FACSS import HSFACSS, HierarchicalRollout
+from modeling.fusion_part.Frequency import Frequency_based_Token_Selection
+from solver.make_optimizer import make_optimizer
 from solver.scheduler_factory import create_scheduler
 
 
@@ -348,6 +353,7 @@ def test_paper_config_matrix():
         assert c.SOLVER.IMS_PER_BATCH == 40
         assert c.SOLVER.MAX_EPOCHS == 120
         assert c.SOLVER.TRAIN_EPOCHS == 20
+        assert c.SOLVER.EVAL_PERIOD == 5
         c.freeze()
         print('     OK {}  HS={} FACSS={} QAWF={}'.format(
             row, actual[0], actual[1], actual[2]))
@@ -431,8 +437,117 @@ def test_hs_facss_modes():
     print('     OK invalid FACSS-without-HS configuration is rejected')
 
 
+def test_optimized_kernels_equivalent():
+    print('[11] optimized selection kernels match reference implementations')
+    torch.manual_seed(7)
+
+    layers = (1, 2, 4)
+    attn_list = [
+        torch.softmax(torch.randn(3, 2, 9, 9), dim=-1)
+        for _ in range(max(layers))
+    ]
+    rollout = HierarchicalRollout(layers=layers, k=3)
+    mask_new, final_new, snapshots_new = rollout(attn_list)
+
+    eye = torch.eye(9).unsqueeze(0)
+    cumulative = None
+    snapshots_ref = {}
+    for layer, attn in enumerate(attn_list, start=1):
+        transition = 0.5 * attn.mean(dim=1) + 0.5 * eye
+        cumulative = transition if cumulative is None else transition @ cumulative
+        if layer in layers:
+            snapshots_ref[layer] = cumulative[:, 0, 1:]
+    mask_ref = torch.zeros_like(mask_new)
+    for layer in layers:
+        indices = snapshots_ref[layer].topk(3, dim=1).indices
+        mask_ref.scatter_(1, indices, True)
+    assert torch.equal(mask_new, mask_ref)
+    assert torch.allclose(final_new, snapshots_ref[max(layers)], atol=1e-6, rtol=1e-5)
+    for layer in layers:
+        assert torch.allclose(snapshots_new[layer], snapshots_ref[layer], atol=1e-6, rtol=1e-5)
+
+    c = default_cfg.clone()
+    c.MODEL.HS_LAYERS = [1]
+    c.MODEL.HS_K = 8
+    c.MODEL.FACSS_DYNAMIC_K = 1
+    c.MODEL.FACSS_MIN_K = 1
+    c.MODEL.FACSS_MAX_K = 3
+    c.MODEL.FACSS_SOFT_RESIDUAL_WEIGHT = 0.0
+    c.MODEL.FACSS_STE = 0
+    c.MODEL.FACSS_MODALITY_UNION = 0
+    selector = HSFACSS(dim=16, cfg=c).eval()
+    features, attentions = _selection_inputs(dim=16, tokens=8, layers=1)
+    selected = _run_selector(selector, features, attentions)
+    for mask in selected[3]:
+        assert torch.equal(mask.sum(dim=1), torch.full((BATCH,), 2))
+
+    patches = {
+        'RGB': features[0][:, 1:],
+        'NIR': features[1][:, 1:],
+        'TIR': features[2][:, 1:],
+    }
+    quality = {
+        'RGB': torch.tensor([0.3, 0.7]),
+        'NIR': torch.tensor([0.5, 0.4]),
+        'TIR': torch.tensor([0.8, 0.6]),
+    }
+    cached = selector._cross_scores(patches, quality=quality)
+    for name in patches:
+        other_names = [other for other in patches if other != name]
+        reference_parts = []
+        for other in other_names:
+            left = torch.nn.functional.normalize(patches[name], dim=-1)
+            right = torch.nn.functional.normalize(patches[other], dim=-1)
+            cosine = (left @ right.transpose(-1, -2)).relu()
+            reference_parts.append(selector._pool_cross(cosine))
+        reference_parts = torch.stack(reference_parts, dim=1)
+        weights = torch.stack([quality[other] for other in other_names], dim=1).unsqueeze(-1)
+        weights = weights / (weights.sum(dim=1, keepdim=True) + 1e-6)
+        reference = (reference_parts * weights).sum(dim=1)
+        assert torch.allclose(cached[name], reference, atol=1e-6, rtol=1e-5)
+
+    frequency = Frequency_based_Token_Selection(keep=3, stride=4)
+    inverse = torch.randn(5, 3, 16, 12)
+    mask_fast = frequency.mask(inverse, window_size=4)
+    counts = []
+    grayscale = inverse.mean(dim=1)
+    for sample in grayscale:
+        unfolded = torch.nn.functional.unfold(
+            sample[None, None], kernel_size=4, stride=4)
+        counts.append(unfolded.gt(0).sum(dim=1).squeeze(0))
+    counts = torch.stack(counts)
+    idx = counts.topk(3, dim=1).indices
+    mask_ref = torch.zeros_like(mask_fast)
+    mask_ref.scatter_(1, idx, True)
+    assert torch.equal(mask_fast, mask_ref)
+    print('     OK rollout, cached cosine, dynamic-K, and frequency mask')
+
+
+def test_optimizer_parameter_groups():
+    print('[12] optimizer groups tensors by effective hyperparameters')
+
+    class TinyModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.BACKBONE = torch.nn.Linear(4, 4)
+            self.FUSE_HEAD = torch.nn.Linear(4, 2)
+            self.extra_norm = torch.nn.LayerNorm(4)
+
+    c = default_cfg.clone()
+    model = TinyModel()
+    center = torch.nn.Linear(2, 2)
+    optimizer, _ = make_optimizer(c, model, center)
+    tensor_count = sum(1 for parameter in model.parameters() if parameter.requires_grad)
+    grouped_count = len(optimizer.param_groups)
+    optimized_count = sum(len(group['params']) for group in optimizer.param_groups)
+    assert optimized_count == tensor_count
+    assert grouped_count < tensor_count
+    assert optimizer.defaults['foreach'] is True
+    print('     OK {} tensors -> {} optimizer groups'.format(tensor_count, grouped_count))
+
+
 def test_paper_model_modes():
-    print('[11] paper M0-M3 end-to-end train/eval smoke')
+    print('[13] paper M0-M3 end-to-end train/eval smoke')
     for row in PAPER_ROWS:
         c = _make_paper_cfg(row)
         c.MODEL.PRETRAIN_CHOICE = 'self'
@@ -463,7 +578,7 @@ def test_paper_model_modes():
 
 
 def test_legacy_a2_quality_frequency():
-    print('[12] legacy-style A2 quality-aware frequency path')
+    print('[14] legacy-style A2 quality-aware frequency path')
     c = _make_legacy_a2_cfg()
     assert c.MODEL.HS_ENABLED
     assert c.MODEL.FACSS_ENABLED
@@ -533,6 +648,8 @@ def main():
     test_ablation_switches()
     test_paper_config_matrix()
     test_hs_facss_modes()
+    test_optimized_kernels_equivalent()
+    test_optimizer_parameter_groups()
     test_paper_model_modes()
     test_legacy_a2_quality_frequency()
     print('\n=== ALL PIPELINE TESTS PASSED ===')
