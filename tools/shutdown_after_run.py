@@ -96,8 +96,13 @@ def main():
             log("{} confirmed and no train process remains; requesting AutoDL shutdown".format(
                 marker.name))
             os.sync()
+            # AutoDL provides /usr/bin/shutdown as a shell command rather than
+            # a directly executable binary, so invoke it through bash.
             completed = subprocess.run(
-                [str(SHUTDOWN_COMMAND)], check=False, timeout=30)
+                ["/bin/bash", "-lc", str(SHUTDOWN_COMMAND)],
+                check=False,
+                timeout=30,
+            )
             if completed.returncode != 0:
                 log("shutdown command failed with return code {}".format(
                     completed.returncode))
