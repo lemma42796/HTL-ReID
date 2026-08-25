@@ -22,6 +22,7 @@ ROWS = (
     'configs/RGBNT201/fusion/t4_facss_masked_facr.yml',
     'configs/RGBNT201/fusion/t5_sfts_masked_facr.yml',
     'configs/RGBNT201/fusion/t6_sfts_learnable_k_facr.yml',
+    'configs/RGBNT201/fusion/t7_sfts_fixed_k16_facr.yml',
 )
 
 
