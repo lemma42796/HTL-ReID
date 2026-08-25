@@ -19,6 +19,8 @@ ROWS = (
     'configs/RGBNT201/fusion/t1_tpm.yml',
     'configs/RGBNT201/fusion/t2_adaptive_routing.yml',
     'configs/RGBNT201/fusion/t3_m2_facr.yml',
+    'configs/RGBNT201/fusion/t4_facss_masked_facr.yml',
+    'configs/RGBNT201/fusion/t5_sfts_masked_facr.yml',
 )
 
 

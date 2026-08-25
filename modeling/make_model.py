@@ -7,6 +7,7 @@ from modeling.backbones.vit_pytorch import vit_base_patch16_224, vit_small_patch
 from modeling.fusion_part.Frequency import Frequency_based_Token_Selection
 from modeling.fusion_part.OCFR import OCFR
 from modeling.fusion_part.HS_FACSS import HSFACSS
+from modeling.fusion_part.SFTS import SFTS
 from modeling.fusion_part.AGF import AGF
 from modeling.fusion_part.TPM import TPM, FACR
 
@@ -253,7 +254,14 @@ class HTLReID(nn.Module):
         self.feat_h = int(cfg.INPUT.SIZE_TRAIN[0] // cfg.MODEL.STRIDE_SIZE[0])
         self.feat_w = int(cfg.INPUT.SIZE_TRAIN[1] // cfg.MODEL.STRIDE_SIZE[1])
         self.num_patches = self.feat_h * self.feat_w
+        self.use_sfts = bool(cfg.MODEL.SFTS_ENABLED)
+        if self.use_sfts and (bool(cfg.MODEL.HS_ENABLED) or bool(cfg.MODEL.FACSS_ENABLED)):
+            raise ValueError('MODEL.SFTS_ENABLED is mutually exclusive with HS/FACSS')
+        # Keep the historical module name so existing HS/FACSS checkpoints
+        # retain exactly the same state-dict keys.
         self.HS_FACSS = HSFACSS(dim=self.BACKBONE.token_dim, cfg=cfg)
+        if self.use_sfts:
+            self.SFTS = SFTS(ratio=cfg.MODEL.SFTS_RATIO)
         self.use_frequency = bool(cfg.MODEL.FREQUENCY_ENABLED)
         self.FREQ_INDEX = Frequency_based_Token_Selection(keep=cfg.MODEL.FREQUENCY_KEEP,
                                                           stride=cfg.MODEL.STRIDE_SIZE[0],
@@ -267,8 +275,9 @@ class HTLReID(nn.Module):
             raise ValueError('MODEL.AGF, MODEL.TPM, and MODEL.FACR are mutually exclusive')
         if self.use_facr and self.facr_use_scores and not bool(cfg.MODEL.FACSS_ENABLED):
             raise ValueError('FACR_USE_SCORES requires FACSS_ENABLED')
-        if self.use_facr and self.facr_use_masks and not bool(cfg.MODEL.FACSS_ENABLED):
-            raise ValueError('FACR_USE_MASKS requires FACSS_ENABLED')
+        if self.use_facr and self.facr_use_masks and not (
+                bool(cfg.MODEL.FACSS_ENABLED) or self.use_sfts):
+            raise ValueError('FACR_USE_MASKS requires FACSS or SFTS')
         self.use_ocfr = bool(cfg.MODEL.OCFR)
         self.use_quality = bool(cfg.MODEL.QUALITY_AWARE)
         self.use_adapter = bool(cfg.MODEL.MODALITY_ADAPTER)
@@ -547,6 +556,11 @@ class HTLReID(nn.Module):
         return self._concat_cls(
             rgb_sel, nir_sel, tir_sel, quality_scores, masks=masks)
 
+    def _select_tokens(self, **kwargs):
+        if self.use_sfts:
+            return self.SFTS(**kwargs)
+        return self.HS_FACSS(**kwargs)
+
     def _agf_aux_pairs(self):
         if (not self.training) or (not self.use_agf) or (not self.agf_aux_supervision):
             return []
@@ -798,7 +812,7 @@ class HTLReID(nn.Module):
                 NIR_cls_score = self.BACKBONE_HEAD(self.BACKBONE_BN(NIR_cls4tri))
                 TIR_cls_score = self.BACKBONE_HEAD(self.BACKBONE_BN(TIR_cls4tri))
 
-            selection = self.HS_FACSS(
+            selection = self._select_tokens(
                 RGB_feat=RGB_feat, RGB_attn=RGB_attn,
                 NIR_feat=NIR_feat, NIR_attn=NIR_attn,
                 TIR_feat=TIR_feat, TIR_attn=TIR_attn,
@@ -864,7 +878,7 @@ class HTLReID(nn.Module):
             mask_fre = self._frequency_mask(
                 RGB, NIR, TIR, img_path, mode, writer, epoch, quality_scores)
 
-            selection = self.HS_FACSS(
+            selection = self._select_tokens(
                 RGB_feat=RGB_feat, RGB_attn=RGB_attn,
                 NIR_feat=NIR_feat, NIR_attn=NIR_attn,
                 TIR_feat=TIR_feat, TIR_attn=TIR_attn,
@@ -919,7 +933,7 @@ class HTLReID(nn.Module):
                 RGB_cls_score = self.BACKBONE_HEAD(self.BACKBONE_BN(RGB_cls4tri))
                 NIR_cls_score = self.BACKBONE_HEAD(self.BACKBONE_BN(NIR_cls4tri))
 
-            RGB_feat_s, NIR_feat_s, mask = self.HS_FACSS(RGB_feat=RGB_feat,
+            RGB_feat_s, NIR_feat_s, mask = self._select_tokens(RGB_feat=RGB_feat,
                                                          RGB_attn=RGB_attn,
                                                          NIR_feat=NIR_feat,
                                                          NIR_attn=NIR_attn,
@@ -978,7 +992,7 @@ class HTLReID(nn.Module):
             mask_fre = self._frequency_mask(
                 RGB, NIR, None, img_path, mode, writer, epoch, quality_scores)
 
-            RGB_feat_s, NIR_feat_s, mask = self.HS_FACSS(RGB_feat=RGB_feat,
+            RGB_feat_s, NIR_feat_s, mask = self._select_tokens(RGB_feat=RGB_feat,
                                                          RGB_attn=RGB_attn,
                                                          NIR_feat=NIR_feat,
                                                          NIR_attn=NIR_attn,
