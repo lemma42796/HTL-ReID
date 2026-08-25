@@ -53,6 +53,28 @@ python test_net.py --config_file configs/RGBNT201/paper/base.yml \
 
 The paper configs explicitly disable re-ranking for the main results.
 
+## Legacy-style A2 comparison
+
+The current implementation can also reproduce the old A2 module combination:
+HS + FACSS + quality weighting + quality-aware frequency selection. This is a
+comparison with the old code path, not a fifth paper ablation row. Merge the
+legacy overlay after the frozen paper base:
+
+```bash
+timeout --signal=TERM --kill-after=10s 30m \
+  /root/miniconda3/bin/python train_net.py \
+  --config_file configs/RGBNT201/paper/base.yml \
+  --config_file configs/RGBNT201/legacy/a2_quality_frequency.yml \
+  OUTPUT_DIR /root/autodl-tmp/outputs/HTL-ReID/E005_L1_legacy_a2_seed1111
+```
+
+This uses RGBNT201, seed 1111, batch size 40, and 20 epochs. The base config
+keeps re-ranking off, so evaluate the saved best checkpoint once with the same
+two configs for the primary comparison. For a separately labeled old-protocol
+number, append
+`--config_file configs/RGBNT201/legacy/eval_rerank.yml` to the evaluation
+command. Both evaluations reuse the same checkpoint; do not retrain.
+
 ## Remaining controlled rows
 
 After E001/M0 has completed, run M1-M3 sequentially with independent
@@ -72,8 +94,8 @@ python test_pipeline.py
 ```
 
 The smoke test checks config merging, scheduler semantics, 3-modal and 2-modal
-forward/backward passes, save/load, explicit HS/FACSS switches, and all four
-paper rows without real datasets.
+forward/backward passes, save/load, explicit HS/FACSS switches, all four paper
+rows, and the legacy-style quality-aware frequency path without real datasets.
 
 ## License
 

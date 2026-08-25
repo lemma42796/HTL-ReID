@@ -22,6 +22,7 @@ Coverage:
  13. Paper M0-M3 configs differ only through explicit HS/FACSS/QAWF switches
  14. M0 bypass, HS-only, and HS+FACSS selection paths behave distinctly
  15. Every paper row completes an end-to-end train/eval smoke pass
+ 16. The legacy-style A2 config runs quality-aware frequency selection
 
 Run:
     python3 test_pipeline.py
@@ -50,6 +51,8 @@ PAPER_ROWS = {
     'M2': 'configs/RGBNT201/paper/m2.yml',
     'M3': 'configs/RGBNT201/paper/m3.yml',
 }
+LEGACY_A2 = 'configs/RGBNT201/legacy/a2_quality_frequency.yml'
+LEGACY_RERANK = 'configs/RGBNT201/legacy/eval_rerank.yml'
 
 NUM_CLASSES = 8
 BATCH = 2
@@ -77,6 +80,13 @@ def _make_paper_cfg(row):
     c = default_cfg.clone()
     c.merge_from_file(PAPER_BASE)
     c.merge_from_file(PAPER_ROWS[row])
+    return c
+
+
+def _make_legacy_a2_cfg():
+    c = default_cfg.clone()
+    c.merge_from_file(PAPER_BASE)
+    c.merge_from_file(LEGACY_A2)
     return c
 
 
@@ -452,6 +462,65 @@ def test_paper_model_modes():
         print('     OK {} train+bwd+eval'.format(row))
 
 
+def test_legacy_a2_quality_frequency():
+    print('[12] legacy-style A2 quality-aware frequency path')
+    c = _make_legacy_a2_cfg()
+    assert c.MODEL.HS_ENABLED
+    assert c.MODEL.FACSS_ENABLED
+    assert c.MODEL.QUALITY_AWARE
+    assert c.MODEL.FREQUENCY_ENABLED
+    assert c.MODEL.FREQUENCY_QUALITY_AWARE
+    assert c.MODEL.FREQUENCY_KEEP == 10
+    assert not c.MODEL.AGF
+    assert not c.MODEL.MODALITY_ADAPTER
+    assert not c.MODEL.PART_BRANCH
+    assert not c.MODEL.OCFR
+    assert c.TEST.RE_RANKING == 'no'
+    assert c.SOLVER.SEED == 1111
+    assert c.SOLVER.IMS_PER_BATCH == 40
+    assert c.SOLVER.TRAIN_EPOCHS == 20
+    rerank_cfg = c.clone()
+    rerank_cfg.merge_from_file(LEGACY_RERANK)
+    assert rerank_cfg.TEST.RE_RANKING == 'yes'
+
+    c.MODEL.PRETRAIN_CHOICE = 'self'
+    c.MODEL.SIE_CAMERA = False
+    c.INPUT.SIZE_TRAIN = [128, 64]
+    c.INPUT.SIZE_TEST = [128, 64]
+    model = make_model(c, num_class=NUM_CLASSES, camera_num=0).cpu()
+    assert model.use_frequency
+    assert model.use_quality
+    assert model.FREQ_INDEX.quality_aware
+
+    frequency_calls = []
+    original_frequency_forward = model.FREQ_INDEX.forward
+
+    def track_frequency_call(*args, **kwargs):
+        quality_scores = kwargs.get('quality_scores')
+        assert quality_scores is not None
+        assert quality_scores.shape == (BATCH, 3)
+        frequency_calls.append(quality_scores.detach().clone())
+        return original_frequency_forward(*args, **kwargs)
+
+    model.FREQ_INDEX.forward = track_frequency_call
+    model.train()
+    x = _dummy_batch(c)
+    label = torch.randint(0, NUM_CLASSES, (BATCH,))
+    output = model(x, cam_label=None, label=label, epoch=0)
+    assert len(output) == 5
+    for i, value in enumerate(output):
+        _assert_finite(value, 'legacy A2 output[{}]'.format(i))
+    _loss_assembly_like_processor(output).backward()
+
+    model.eval()
+    with torch.no_grad():
+        descriptor = model(x, cam_label=None, epoch=0)
+    assert descriptor.shape == (BATCH, 3 * model.BACKBONE.token_dim)
+    _assert_finite(descriptor, 'legacy A2 descriptor')
+    assert len(frequency_calls) == 2
+    print('     OK train+bwd+eval; frequency received learned quality scores')
+
+
 def main():
     test_defaults_load()
     test_yml_configs_merge()
@@ -465,6 +534,7 @@ def main():
     test_paper_config_matrix()
     test_hs_facss_modes()
     test_paper_model_modes()
+    test_legacy_a2_quality_frequency()
     print('\n=== ALL PIPELINE TESTS PASSED ===')
 
 

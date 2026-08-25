@@ -1,0 +1,5 @@
+# Optional evaluation-only overlay for comparison with the old-code protocol.
+# Always report this result separately from the main no-re-ranking result.
+TEST:
+  RE_RANKING: 'yes'
+
