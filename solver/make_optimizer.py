@@ -4,6 +4,7 @@ import torch
 def _is_new_module(name):
     prefixes = (
         'HS_FACSS', 'AGF', 'QUALITY_HEAD', 'MODALITY_ADAPTERS',
+        'CROSS_MODAL_RECON',
         'SELECTED_CONTEXT_', 'SELECTED_AGGREGATOR', 'PART_', 'FUSE_', 'BACKBONE_HEAD',
         'BACKBONE_BN', 'AL_'
     )

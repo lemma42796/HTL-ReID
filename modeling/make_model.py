@@ -10,6 +10,8 @@ from modeling.fusion_part.HS_FACSS import HSFACSS
 from modeling.fusion_part.SFTS import SFTS
 from modeling.fusion_part.AGF import AGF
 from modeling.fusion_part.TPM import TPM, FACR
+from modeling.fusion_part.CrossModalReconstruction import \
+    SharedCrossModalTokenReconstruction
 
 
 def weights_init_kaiming(m):
@@ -285,6 +287,10 @@ class HTLReID(nn.Module):
         self.facr_independent_aggregation = bool(
             cfg.MODEL.FACR_INDEPENDENT_AGG)
         self.facr_self_refine = bool(cfg.MODEL.FACR_SELF_REFINE)
+        self.use_cross_modal_recon = bool(
+            cfg.MODEL.CROSS_MODAL_RECON_ENABLED)
+        self.cross_modal_recon_loss_weight = float(
+            cfg.MODEL.CROSS_MODAL_RECON_LOSS_WEIGHT)
         self._last_facr_stats_epoch = None
         if sum((self.use_agf, self.use_tpm, self.use_facr)) > 1:
             raise ValueError('MODEL.AGF, MODEL.TPM, and MODEL.FACR are mutually exclusive')
@@ -304,6 +310,12 @@ class HTLReID(nn.Module):
                 self.use_facr and self.facr_use_masks and self.facr_self_refine):
             raise ValueError(
                 'SFTS_RESIDUAL_TOKEN requires masked FACR self-refinement')
+        if self.cross_modal_recon_loss_weight < 0.0:
+            raise ValueError(
+                'CROSS_MODAL_RECON_LOSS_WEIGHT must be non-negative')
+        if self.use_cross_modal_recon and self.cross_modal_recon_loss_weight == 0.0:
+            raise ValueError(
+                'enabled cross-modal reconstruction requires a positive loss weight')
         self.use_ocfr = bool(cfg.MODEL.OCFR)
         self.use_quality = bool(cfg.MODEL.QUALITY_AWARE)
         self.use_adapter = bool(cfg.MODEL.MODALITY_ADAPTER)
@@ -313,6 +325,9 @@ class HTLReID(nn.Module):
         if self.part_pool not in ('stripe', 'semantic'):
             raise ValueError("MODEL.PART_POOL must be 'stripe' or 'semantic'")
         self.modality_drop_prob = float(cfg.INPUT.MODALITY_DROP_PROB)
+        if self.use_cross_modal_recon and self.modality_drop_prob > 0.0:
+            raise ValueError(
+                'cross-modal reconstruction is incompatible with input modality dropout')
         self.align_loss_weight = float(cfg.MODEL.ALIGN_LOSS_WEIGHT)
         self.token_consistency_weight = float(cfg.MODEL.TOKEN_CONSISTENCY_WEIGHT)
         self.bcc_loss_weight = float(cfg.MODEL.BCC_LOSS_WEIGHT)
@@ -373,6 +388,11 @@ class HTLReID(nn.Module):
                 self_refine=self.facr_self_refine,
                 self_refine_scale_init=cfg.MODEL.FACR_SELF_REFINE_SCALE_INIT,
                 independent_aggregation=self.facr_independent_aggregation,
+            )
+        if self.use_cross_modal_recon:
+            self.CROSS_MODAL_RECON = SharedCrossModalTokenReconstruction(
+                dim=self.BACKBONE.token_dim,
+                hidden_dim=cfg.MODEL.CROSS_MODAL_RECON_HIDDEN_DIM,
             )
         if self.use_agf:
             self.AGF = AGF(dim=self.BACKBONE.token_dim,
@@ -603,6 +623,14 @@ class HTLReID(nn.Module):
         if not self.use_facr:
             return torch.zeros((), device=reference.device, dtype=reference.dtype)
         return self.FACR.regularization_loss(reference)
+
+    def _cross_modal_reconstruction_loss(self, features):
+        reference = features[0]
+        if not self.use_cross_modal_recon:
+            return torch.zeros(
+                (), device=reference.device, dtype=reference.dtype)
+        loss = self.CROSS_MODAL_RECON(features)
+        return self.cross_modal_recon_loss_weight * loss
 
     def _log_facr_statistics(self, writer, epoch):
         if (not self.use_facr or writer is None or epoch is None or
@@ -903,6 +931,8 @@ class HTLReID(nn.Module):
             loss_aux = loss_aux + self._quality_dropout_loss(quality_scores, keep_mask)
             loss_aux = loss_aux + self._selector_regularization(RGB_feat)
             loss_aux = loss_aux + self._facr_regularization(RGB_feat)
+            loss_aux = loss_aux + self._cross_modal_reconstruction_loss(
+                (RGB_feat, NIR_feat, TIR_feat))
             self._log_facr_statistics(writer, epoch)
             score = self.FUSE_HEAD(self.FUSE_BN(cls4t))
             agf_aux_pairs = self._agf_aux_pairs()

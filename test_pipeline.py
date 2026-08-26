@@ -29,6 +29,9 @@ Coverage:
  19. FACR route balancing is differentiable and disabled by default
  20. T11 independent masked aggregation ignores dropped patches, backpropagates,
      and is disabled for all existing configurations
+ 21. T12 shared token reconstruction excludes the target input, stop-gradients
+     its teacher tokens, backpropagates through both source modalities, and is
+     absent from evaluation
 
 Run:
     python3 test_pipeline.py
@@ -43,6 +46,8 @@ from modeling.make_model import make_model
 from modeling.fusion_part.HS_FACSS import HSFACSS, HierarchicalRollout
 from modeling.fusion_part.Frequency import Frequency_based_Token_Selection
 from modeling.fusion_part.TPM import FACR, ScoreBiasedCrossAttention
+from modeling.fusion_part.CrossModalReconstruction import \
+    SharedCrossModalTokenReconstruction
 from solver.make_optimizer import make_optimizer
 from solver.scheduler_factory import create_scheduler
 
@@ -139,6 +144,7 @@ def test_defaults_load():
     assert c.MODEL.HS_ENABLED in (0, 1)
     assert c.MODEL.FACSS_ENABLED in (0, 1)
     assert c.MODEL.FREQUENCY_ENABLED in (0, 1)
+    assert not c.MODEL.CROSS_MODAL_RECON_ENABLED
     print('     OK')
 
 
@@ -740,8 +746,100 @@ def test_facr_independent_masked_aggregation():
     print('     OK mask invariance, gradients, disabled path, config, and model wiring')
 
 
+def test_shared_cross_modal_token_reconstruction():
+    print('[16] training-only shared cross-modal token reconstruction')
+    torch.manual_seed(29)
+    batch, patches, dim = 2, 6, 16
+    features = tuple(
+        torch.randn(batch, patches + 1, dim, requires_grad=True)
+        for _ in range(3)
+    )
+    reconstruction = SharedCrossModalTokenReconstruction(
+        dim=dim, hidden_dim=8).train()
+
+    target_index = 2
+    prediction = reconstruction.predict(features, target_index)
+    assert prediction.shape == (batch, patches, dim)
+    changed_target = list(feature.detach().clone() for feature in features)
+    changed_target[target_index].mul_(1e4).add_(torch.randn_like(
+        changed_target[target_index]))
+    changed_prediction = reconstruction.predict(
+        tuple(changed_target), target_index)
+    assert torch.allclose(
+        prediction.detach(), changed_prediction, atol=1e-6, rtol=1e-6), \
+        'target tokens leaked into their own reconstruction predictor'
+
+    loss = reconstruction(features, target_index=target_index)
+    assert loss.ndim == 0 and torch.isfinite(loss)
+    loss.backward()
+    assert features[0].grad is not None and torch.isfinite(features[0].grad).all()
+    assert features[1].grad is not None and torch.isfinite(features[1].grad).all()
+    assert features[target_index].grad is None, \
+        'teacher target must be stop-gradient'
+    assert all(
+        parameter.grad is not None and torch.isfinite(parameter.grad).all()
+        for parameter in reconstruction.parameters()
+        if parameter.requires_grad)
+
+    cfg = default_cfg.clone()
+    cfg.merge_from_file(PAPER_BASE)
+    cfg.merge_from_file(
+        'configs/RGBNT201/fusion/t12_sfts_k1_shared_token_recon.yml')
+    assert cfg.MODEL.SFTS_ENABLED
+    assert cfg.MODEL.SFTS_RATIO == 0.003472222222222222
+    assert cfg.MODEL.FACR and cfg.MODEL.FACR_USE_MASKS
+    assert not cfg.MODEL.FACR_INDEPENDENT_AGG
+    assert cfg.MODEL.CROSS_MODAL_RECON_ENABLED
+    assert cfg.MODEL.CROSS_MODAL_RECON_HIDDEN_DIM == 256
+    assert cfg.MODEL.CROSS_MODAL_RECON_LOSS_WEIGHT == 0.1
+    assert cfg.MODEL.AUX_LOSS_WEIGHT == 1.0
+    assert cfg.MODEL.AUX_WARMUP_EPOCHS == 5
+
+    baseline_cfg = default_cfg.clone()
+    baseline_cfg.merge_from_file(PAPER_BASE)
+    baseline_cfg.merge_from_file(
+        'configs/RGBNT201/fusion/t7_sfts_fixed_k1_facr.yml')
+    assert not baseline_cfg.MODEL.CROSS_MODAL_RECON_ENABLED
+
+    cfg.MODEL.PRETRAIN_CHOICE = 'self'
+    cfg.MODEL.SIE_CAMERA = False
+    cfg.INPUT.SIZE_TRAIN = [128, 64]
+    cfg.INPUT.SIZE_TEST = [128, 64]
+    model = make_model(cfg, num_class=NUM_CLASSES, camera_num=0).cpu()
+    assert model.use_cross_modal_recon
+    assert hasattr(model, 'CROSS_MODAL_RECON')
+    model.train()
+    inputs = _dummy_batch(cfg)
+    labels = torch.randint(0, NUM_CLASSES, (BATCH,))
+    output = model(inputs, cam_label=None, label=labels, epoch=1)
+    assert len(output) == 5
+    assert output[-1].ndim == 0 and torch.isfinite(output[-1])
+    assert output[-1].item() > 0.0
+    _loss_assembly_like_processor(output).backward()
+    wired_parameters = [
+        parameter for name, parameter in model.named_parameters()
+        if name.startswith('CROSS_MODAL_RECON.') and parameter.requires_grad
+    ]
+    assert wired_parameters
+    assert all(
+        parameter.grad is not None and torch.isfinite(parameter.grad).all()
+        for parameter in wired_parameters)
+    assert model.CROSS_MODAL_RECON._last_target_index in (0, 1, 2)
+
+    def reconstruction_must_not_run(*args, **kwargs):
+        raise AssertionError('training-only reconstruction ran during evaluation')
+
+    model.CROSS_MODAL_RECON.forward = reconstruction_must_not_run
+    model.eval()
+    with torch.no_grad():
+        descriptor = model(inputs, cam_label=None, epoch=1)
+    assert descriptor.shape == (BATCH, 3 * model.BACKBONE.token_dim)
+    assert torch.isfinite(descriptor).all()
+    print('     OK target exclusion, stop-gradient, source gradients, config, and eval bypass')
+
+
 def test_paper_model_modes():
-    print('[16] paper M0-M3 end-to-end train/eval smoke')
+    print('[17] paper M0-M3 end-to-end train/eval smoke')
     for row in PAPER_ROWS:
         c = _make_paper_cfg(row)
         c.MODEL.PRETRAIN_CHOICE = 'self'
@@ -772,7 +870,7 @@ def test_paper_model_modes():
 
 
 def test_legacy_a2_quality_frequency():
-    print('[17] legacy-style A2 quality-aware frequency path')
+    print('[18] legacy-style A2 quality-aware frequency path')
     c = _make_legacy_a2_cfg()
     assert c.MODEL.HS_ENABLED
     assert c.MODEL.FACSS_ENABLED
@@ -847,6 +945,7 @@ def main():
     test_facr_score_bias_starts_from_t2()
     test_facr_route_balance_loss()
     test_facr_independent_masked_aggregation()
+    test_shared_cross_modal_token_reconstruction()
     test_paper_model_modes()
     test_legacy_a2_quality_frequency()
     print('\n=== ALL PIPELINE TESTS PASSED ===')

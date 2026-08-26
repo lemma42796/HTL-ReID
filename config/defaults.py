@@ -124,6 +124,12 @@ _C.MODEL.FACR_SELF_REFINE_SCALE_INIT = 0.1
 # Batch-level load balancing for FACR. It keeps both candidate source
 # modalities used across a batch without forcing every sample to route 50/50.
 _C.MODEL.FACR_ROUTE_BALANCE_WEIGHT = 0.0
+# Training-only shared cross-modal token reconstruction. This is an attributed
+# CRM-inspired auxiliary objective adapted to the shared-backbone setting; it
+# never changes the inference descriptor or existing checkpoints by default.
+_C.MODEL.CROSS_MODAL_RECON_ENABLED = 0
+_C.MODEL.CROSS_MODAL_RECON_HIDDEN_DIM = 256
+_C.MODEL.CROSS_MODAL_RECON_LOSS_WEIGHT = 0.1
 # OCFR auxiliary loss (not in paper); off by default for paper-faithful reproduction
 _C.MODEL.OCFR = 0
 # Ablation switches (1=enable, 0=disable)
