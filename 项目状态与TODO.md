@@ -4,7 +4,7 @@
 
 ## 一、信息入口
 
-- 最后更新：2026-08-27 02:04 CST
+- 最后更新：2026-08-27 02:10 CST
 - 项目根目录：`/Users/a123/Documents/reid`
 - 代码目录：`/Users/a123/Documents/reid/HTL-ReID`
 - 远端代码目录：`/root/autodl-tmp/HTL-ReID`
@@ -91,11 +91,11 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 
 ## 四、代码与验证状态
 
-- T12代码已提交并用于E029正式训练，训练代码快照为`0daf4d2`；能力默认关闭，K1/T11配置与旧checkpoint结构不变。E020/E021训练时runner记录的HEAD仍为`7886101`，但其工作区快照与随后冻结的`bc4e0bb`一致。E006–E008训练代码快照为`1b2aa71`，E009训练代码快照为`e2af604`，E014训练代码快照为`df17584`，E015–E018训练代码快照为`2cc3438`。
+- T12代码已提交并用于E029/E030正式训练，训练代码快照为`0daf4d2`；能力默认关闭，K1/T11配置与旧checkpoint结构不变。E020/E021训练时runner记录的HEAD仍为`7886101`，但其工作区快照与随后冻结的`bc4e0bb`一致。E006–E008训练代码快照为`1b2aa71`，E009训练代码快照为`e2af604`，E014训练代码快照为`df17584`，E015–E018训练代码快照为`2cc3438`。
 - 核心提交：`0089f1b`（TPM/FACR/FACSS接口）、`157a99c`（CUDA测试入口）、`1b2aa71`（E006–E008顺序runner）、`e2af604`（零初始化有界评分偏置及单实验runner）、`7886101`（可选FACR批级路由均衡损失与统计）、`bc4e0bb`（SFTS丢弃信息残差摘要与FACR最终自细化）、`32bbc7b`（融合runner显式seed覆盖）、`a78c007`（FACR前置独立masked aggregation与T11）、`0daf4d2`（训练期共享跨模态token重建与T12）。
 - 核心代码：`modeling/fusion_part/TPM.py`、`modeling/fusion_part/HS_FACSS.py`、`modeling/fusion_part/CrossModalReconstruction.py`、`modeling/make_model.py`。
 - 配置：`configs/RGBNT201/fusion/t1_tpm.yml`、`t2_adaptive_routing.yml`、`t3_m2_facr.yml`、`t7_sfts_fixed_k16_facr.yml`、`t8_sfts_fixed_k16_route_balance.yml`、`t9_facr_self_refine.yml`、`t10_sfts_k1_residual_facr.yml`、`t11_sfts_k1_independent_facr.yml`、`t12_sfts_k1_shared_token_recon.yml`。
-- T1–T12相关CPU前向、反向、mask不变性、T12目标隔离/stop-gradient/评估旁路与完整模型接线测试已通过；E029已在RTX 5090上完成20 epoch正式训练，无OOM、NaN或timeout。
+- T1–T12相关CPU前向、反向、mask不变性、T12目标隔离/stop-gradient/评估旁路与完整模型接线测试已通过；E029/E030均已在RTX 5090上完成20 epoch正式训练，无OOM、NaN或timeout。
 - 计算优化已经完成：HS rollout降阶、跨模态相似度复用、动态Top-K与频域mask批量化、训练同步/传输及AdamW参数组优化。
 - T8路由均衡能力已实现并保持默认关闭：`FACR_ROUTE_BALANCE_WEIGHT=0.0`不改变现有配置和checkpoint。E019以0.05正式训练后主指标退化，且路由诊断未发现明显塌缩，因此仅保留该能力用于诊断/消融，不进入最终模型。
 - T9/T10能力已实现且默认关闭：SFTS可输出每模态一个丢弃patch残差摘要，FACR可选最终自模态细化。T9全tokens自细化和T10残差摘要路径均已否定为最终精度方案，仅保留代码用于复现消融。
@@ -179,8 +179,10 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 3. E030已通过配对验证；停止RGBNT201上的T12额外seed与重建权重搜索；
 4. 后续优先使用冻结T12配置进入RGBNT100和MSVR310跨数据集验证，不再以同数据集重复seed消耗训练时间；
 5. K1保留为稳定参照；如论文必须补充第三seed，只在用户明确授权后讨论，不默认执行；
-6. 完成M0与K1的参数量、GFLOPs、延迟和显存对比；K1 mask未物理压缩FACR输入，不声称等比例效率收益；
+6. 完成M0与T12/K1推理路径的参数量、GFLOPs、延迟和显存对比；K1 mask未物理压缩FACR输入，不声称等比例效率收益；
 7. 用三seed统计更新论文方法、消融表、摘要和回复信，主结果报告mean±std。
+
+可选性能上限方向（未实现、未授权运行）：当前T12对全部288个patch等权计算重建损失，背景区域可能稀释身份监督。如果跨数据集前仍明确要求只做一次RGBNT201改进，唯一优先候选是使用`detach`后的SFTS共享mask对逐token余弦重建损失加权：被选token高权重、未选token保留低权重并按权重和归一化；总损失系数继续固定0.1，不做网格搜索、不增加推理计算、只按单seed筛选。默认计划仍是直接转跨数据集，不自动启动该实验。
 
 ## 八、统一约束
 
