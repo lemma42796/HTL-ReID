@@ -138,7 +138,7 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 
 ## 六、当前运行状态
 
-- E030/T12-S1已完成启动前登记：seed 2222，20 epoch，batch 40，关闭re-ranking；只相对E029改变seed，目标输出目录不存在，远端磁盘空间充足且无训练残留进程。
+- E030/T12-S1已于2026-08-27 01:44 CST启动：commit `0daf4d2`，seed 2222，20 epoch，batch 40，关闭re-ranking，runner PID 3919；只相对E029改变seed。一次启动检查已确认GNU timeout、seed覆盖和RTX 5090训练正常，显存约24.3 GiB并进入epoch 1；不持续轮询。
 - E029/T12已正常完成：commit `0daf4d2`，returncode 0，耗时757.7秒；最佳epoch 20，65.82 mAP、67.58 Rank-1、79.43 Rank-5、85.65 Rank-10。相对同seed E015/K1提升2.51/0.59/1.20/2.16，通过预设seed 2222晋级门槛；结果JSON、DONE、日志、配置快照、TensorBoard事件和最佳checkpoint均已保留，runner未生成预期的`retention.json`。
 - E028/T11-S1已正常完成：commit `a78c007`，returncode 0，耗时763.2秒；最佳epoch 17，64.76 mAP、67.46 Rank-1、81.46 Rank-5、86.36 Rank-10；实际保留11.6706%。较同seed E023/K1的mAP和Rank-1分别低0.17和0.36，未通过预设门槛，不运行seed 3333。
 - E027/T11已正常完成：commit `a78c007`，returncode 0，耗时771.7秒；最佳epoch 20，66.86 mAP、69.86 Rank-1、82.54 Rank-5、88.16 Rank-10；实际保留11.3782%。相对E015/K1同seed提高3.55/2.87/4.31/4.67，通过预设晋级门槛。
@@ -174,7 +174,7 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 
 1. 保持K1为冻结基线和同协议参照，不再改变T11结构；
 2. E028未复现T11对K1的主指标优势，按预设规则不运行T11 seed 3333；T11仅作为单seed正向但不稳定的消融；
-3. 启动E030：只使用E029相同配置运行seed 2222配对验证，不追加重建权重搜索；
+3. E030正在使用E029相同配置运行seed 2222配对验证；不持续轮询，不追加重建权重搜索；
 4. T12在seed 2222复现前仍是候选，不替换三seed已验证的K1；若同seed主指标未超过E023/K1，则停止T12追加实验；
 5. 在T12是否运行的决策之外，继续以K1进入RGBNT100和MSVR310的跨数据集验证；
 6. 完成M0与K1的参数量、GFLOPs、延迟和显存对比；K1 mask未物理压缩FACR输入，不声称等比例效率收益；
