@@ -1,5 +1,12 @@
 # HTL-ReID
 
+## Project documentation
+
+- [Project status and TODO](项目状态与TODO.md)
+- [Paper revision plan](论文大修执行方案.md)
+- [Experiment index](实验记录.md)
+- [Reproducible experiment records](实验记录/)
+
 HTL-ReID is a research codebase for robust multi-modal object re-identification
 with RGB / NIR / TIR inputs.
 
