@@ -33,7 +33,7 @@ M0–M3、T1–T11、固定K参数敏感性及三seed T2/K1配对实验已经完
 | T10 / E021、E024 | K=1 SFTS丢弃信息摘要 + masked FACR自细化 | 额外seed未复现优势；不作为最终精度候选 |
 | T2/K1三seed / E007、E015、E022、E023、E025、E026 | 全tokens T2 vs 固定K=1 SFTS + FACR | K1平均mAP略高且Rank-1三次一致领先；锁定K1 |
 | T11 / E027、E028 | K1 + FACR前置独立masked aggregation | seed 1111大幅提升，但seed 2222的mAP/Rank-1均略低于K1；不替换最终K1 |
-| T12 / E029 | K1 + 训练期共享跨模态token重建 | 检验CRM式密集特征监督能否补足共享ViT的表征容量；已授权，待启动 |
+| T12 / E029 | K1 + 训练期共享跨模态token重建 | 检验CRM式密集特征监督能否补足共享ViT的表征容量；seed 1111运行中 |
 
 TPM只作为TOP-ReID引用复现，不能改名冒充原创。FACR的实质差异是固定循环变为样本自适应全连接路由；FACSS连续分数、T10残差摘要和自细化均已被稳定性实验排除出最终主线。
 
@@ -137,6 +137,7 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 
 ## 六、当前运行状态
 
+- E029/T12已于2026-08-27 01:20 CST启动：commit `0daf4d2`，seed 1111，20 epoch，batch 40，关闭re-ranking；输出目录`/root/autodl-tmp/outputs/HTL-ReID/E029_T12_sfts_k1_shared_token_recon_seed1111`，runner PID 1731。首次检查已正常进入epoch 1，GPU利用率99%、显存约24.3 GiB；不持续轮询。
 - E028/T11-S1已正常完成：commit `a78c007`，returncode 0，耗时763.2秒；最佳epoch 17，64.76 mAP、67.46 Rank-1、81.46 Rank-5、86.36 Rank-10；实际保留11.6706%。较同seed E023/K1的mAP和Rank-1分别低0.17和0.36，未通过预设门槛，不运行seed 3333。
 - E027/T11已正常完成：commit `a78c007`，returncode 0，耗时771.7秒；最佳epoch 20，66.86 mAP、69.86 Rank-1、82.54 Rank-5、88.16 Rank-10；实际保留11.3782%。相对E015/K1同seed提高3.55/2.87/4.31/4.67，通过预设晋级门槛。
 
@@ -171,7 +172,7 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 
 1. 保持K1为冻结基线和同协议参照，不再改变T11结构；
 2. E028未复现T11对K1的主指标优势，按预设规则不运行T11 seed 3333；T11仅作为单seed正向但不稳定的消融；
-3. T12已分配E029并获得GPU正式训练授权；冻结`paper/base.yml + t12_sfts_k1_shared_token_recon.yml`，RGBNT201、seed 1111、batch 40、20 epoch、关闭re-ranking，输出目录为`/root/autodl-tmp/outputs/HTL-ReID/E029_T12_sfts_k1_shared_token_recon_seed1111`，保留resolved config、命令、日志、结果JSON、最佳checkpoint和DONE/FAILED标记；
+3. E029/T12正在以冻结配置运行；不持续轮询，用户请求状态时再检查结果；
 4. T12预设门槛为相对同seed E015/K1至少+1.0 mAP且Rank-1不下降；未通过则立即停止，通过后才讨论seed 2222，不追加权重搜索；
 5. 在T12是否运行的决策之外，继续以K1进入RGBNT100和MSVR310的跨数据集验证；
 6. 完成M0与K1的参数量、GFLOPs、延迟和显存对比；K1 mask未物理压缩FACR输入，不声称等比例效率收益；
@@ -193,4 +194,4 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 3. `/Users/a123/Documents/reid/HTL-ReID/实验记录/E025_T2_RGBNT201_seed3333.md`、`E026_K1_RGBNT201_seed3333.md`及`实验记录.md`三seed汇总，再按需读取E007、E015、E022和E023；
 4. 如需代码细节，再读`HTL-ReID/modeling/fusion_part/SFTS.py`、`TPM.py`和`modeling/make_model.py`；
 5. 确认GitHub与训练机为`a78c007`，本地基于该提交有待提交T12改动；K1实现保持兼容，T11/T12能力均默认关闭并由独立配置开启；E027/E028已完成，不得重复启动；
-6. K1保持冻结最终结构；T11稳定性验证已停止；T12仅完成代码，未启动正式训练。
+6. K1保持冻结最终结构；T11稳定性验证已停止；E029/T12已启动，不得重复启动。
