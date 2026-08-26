@@ -255,8 +255,11 @@ class HTLReID(nn.Module):
         self.feat_w = int(cfg.INPUT.SIZE_TRAIN[1] // cfg.MODEL.STRIDE_SIZE[1])
         self.num_patches = self.feat_h * self.feat_w
         self.use_sfts = bool(cfg.MODEL.SFTS_ENABLED)
+        self.sfts_residual_token = bool(cfg.MODEL.SFTS_RESIDUAL_TOKEN)
         if self.use_sfts and (bool(cfg.MODEL.HS_ENABLED) or bool(cfg.MODEL.FACSS_ENABLED)):
             raise ValueError('MODEL.SFTS_ENABLED is mutually exclusive with HS/FACSS')
+        if self.sfts_residual_token and not self.use_sfts:
+            raise ValueError('SFTS_RESIDUAL_TOKEN requires SFTS_ENABLED')
         # Keep the historical module name so existing HS/FACSS checkpoints
         # retain exactly the same state-dict keys.
         self.HS_FACSS = HSFACSS(dim=self.BACKBONE.token_dim, cfg=cfg)
@@ -279,6 +282,7 @@ class HTLReID(nn.Module):
         self.use_facr = bool(cfg.MODEL.FACR)
         self.facr_use_scores = bool(cfg.MODEL.FACR_USE_SCORES)
         self.facr_use_masks = bool(cfg.MODEL.FACR_USE_MASKS)
+        self.facr_self_refine = bool(cfg.MODEL.FACR_SELF_REFINE)
         self._last_facr_stats_epoch = None
         if sum((self.use_agf, self.use_tpm, self.use_facr)) > 1:
             raise ValueError('MODEL.AGF, MODEL.TPM, and MODEL.FACR are mutually exclusive')
@@ -287,6 +291,12 @@ class HTLReID(nn.Module):
         if self.use_facr and self.facr_use_masks and not (
                 bool(cfg.MODEL.FACSS_ENABLED) or self.use_sfts):
             raise ValueError('FACR_USE_MASKS requires FACSS or SFTS')
+        if self.facr_self_refine and not self.use_facr:
+            raise ValueError('FACR_SELF_REFINE requires FACR')
+        if self.sfts_residual_token and not (
+                self.use_facr and self.facr_use_masks and self.facr_self_refine):
+            raise ValueError(
+                'SFTS_RESIDUAL_TOKEN requires masked FACR self-refinement')
         self.use_ocfr = bool(cfg.MODEL.OCFR)
         self.use_quality = bool(cfg.MODEL.QUALITY_AWARE)
         self.use_adapter = bool(cfg.MODEL.MODALITY_ADAPTER)
@@ -353,6 +363,8 @@ class HTLReID(nn.Module):
                 detach_scores=bool(cfg.MODEL.FACR_DETACH_SCORES),
                 gate_init_bias=cfg.MODEL.FACR_GATE_INIT_BIAS,
                 route_balance_weight=cfg.MODEL.FACR_ROUTE_BALANCE_WEIGHT,
+                self_refine=self.facr_self_refine,
+                self_refine_scale_init=cfg.MODEL.FACR_SELF_REFINE_SCALE_INIT,
             )
         if self.use_agf:
             self.AGF = AGF(dim=self.BACKBONE.token_dim,
@@ -548,7 +560,8 @@ class HTLReID(nn.Module):
         return torch.cat(fused_nodes, dim=-1)
 
     def _fusion_cls(self, full_feats, selected_feats, quality_scores=None,
-                    masks=None, facss_scores=None, facr_masks=None):
+                    masks=None, facss_scores=None, facr_masks=None,
+                    facr_residual_tokens=None):
         """Select exactly one descriptor path while keeping inputs explicit."""
         rgb_full, nir_full, tir_full = full_feats
         rgb_sel, nir_sel, tir_sel = selected_feats
@@ -559,7 +572,8 @@ class HTLReID(nn.Module):
             facr_masks = facr_masks if self.facr_use_masks else None
             return self.FACR(
                 rgb_full, nir_full, tir_full,
-                scores=scores, masks=facr_masks)
+                scores=scores, masks=facr_masks,
+                residual_tokens=facr_residual_tokens)
         if self.use_agf:
             return self._agf_cls(
                 rgb_sel, nir_sel, tir_sel, quality_scores, masks=masks)
@@ -568,6 +582,7 @@ class HTLReID(nn.Module):
 
     def _select_tokens(self, **kwargs):
         if self.use_sfts:
+            kwargs['return_residual_tokens'] = self.sfts_residual_token
             return self.SFTS(**kwargs)
         return self.HS_FACSS(**kwargs)
 
@@ -852,17 +867,22 @@ class HTLReID(nn.Module):
             selection_idx = 4
             facss_scores = None
             facss_gates = None
+            facr_residual_tokens = None
             if self.use_facr and self.facr_use_scores:
                 facss_scores = selection[selection_idx]
                 selection_idx += 1
             if self.use_facr and self.facr_use_masks:
                 facss_gates = selection[selection_idx]
+                selection_idx += 1
+            if self.sfts_residual_token:
+                facr_residual_tokens = selection[selection_idx]
 
             cls4t = self._fusion_cls(
                 (RGB_feat, NIR_feat, TIR_feat),
                 (RGB_feat_s, NIR_feat_s, TIR_feat_s),
                 quality_scores=quality_scores, masks=mask,
-                facss_scores=facss_scores, facr_masks=facss_gates)
+                facss_scores=facss_scores, facr_masks=facss_gates,
+                facr_residual_tokens=facr_residual_tokens)
             if self.use_ocfr:
                 RGB_cls = RGB_feat_s[:, 0, :]
                 NIR_cls = NIR_feat_s[:, 0, :]
@@ -921,17 +941,22 @@ class HTLReID(nn.Module):
             selection_idx = 4
             facss_scores = None
             facss_gates = None
+            facr_residual_tokens = None
             if self.use_facr and self.facr_use_scores:
                 facss_scores = selection[selection_idx]
                 selection_idx += 1
             if self.use_facr and self.facr_use_masks:
                 facss_gates = selection[selection_idx]
+                selection_idx += 1
+            if self.sfts_residual_token:
+                facr_residual_tokens = selection[selection_idx]
 
             cls4t = self._fusion_cls(
                 (RGB_feat, NIR_feat, TIR_feat),
                 (RGB_feat_s, NIR_feat_s, TIR_feat_s),
                 quality_scores=quality_scores, masks=mask,
-                facss_scores=facss_scores, facr_masks=facss_gates)
+                facss_scores=facss_scores, facr_masks=facss_gates,
+                facr_residual_tokens=facr_residual_tokens)
             return self._test_descriptor(cls4t, RGB_feat_s, NIR_feat_s, TIR_feat_s,
                                          quality_scores, masks=mask)
 

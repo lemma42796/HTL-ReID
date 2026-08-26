@@ -57,6 +57,9 @@ _C.MODEL.SFTS_GUMBEL_TAU = 1.0
 _C.MODEL.SFTS_GUMBEL_TAU_MIN = 0.2
 _C.MODEL.SFTS_GUMBEL_TAU_DECAY = 0.9
 _C.MODEL.SFTS_BUDGET_LOSS_WEIGHT = 0.05
+# Preserve information outside the shared hard mask as one attention-weighted
+# residual token per modality. Consumed only by FACR final self-refinement.
+_C.MODEL.SFTS_RESIDUAL_TOKEN = 0
 # HS (Hierarchical Token Selection)
 _C.MODEL.HS_ENABLED = 1
 _C.MODEL.HS_LAYERS = [4, 8, 12]
@@ -111,6 +114,9 @@ _C.MODEL.FACR_SCORE_BIAS_SCALE = 0.25
 _C.MODEL.FACR_SCORE_FLOOR = 0.05
 _C.MODEL.FACR_DETACH_SCORES = 1
 _C.MODEL.FACR_GATE_INIT_BIAS = 0.0
+# Optional final own-modality patch read after the adaptive cross-modal stages.
+_C.MODEL.FACR_SELF_REFINE = 0
+_C.MODEL.FACR_SELF_REFINE_SCALE_INIT = 0.1
 # Batch-level load balancing for FACR. It keeps both candidate source
 # modalities used across a batch without forcing every sample to route 50/50.
 _C.MODEL.FACR_ROUTE_BALANCE_WEIGHT = 0.0

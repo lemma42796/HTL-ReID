@@ -42,6 +42,10 @@ class PartAttention(nn.Module):
     def forward(self, attn_list, candidate_weights=None, candidates=None):
         cls_attention = self._rollout_cls(attn_list)
         batch_size, num_heads, num_patches = cls_attention.shape
+        # Retain a modality-specific saliency distribution for summarizing
+        # tokens outside the final shared mask. Selection itself remains the
+        # paper-faithful per-head top-K union.
+        saliency = cls_attention.mean(dim=1).clamp_min(0.0)
 
         if candidate_weights is not None:
             if candidates is None or candidate_weights.numel() != len(candidates):
@@ -64,7 +68,7 @@ class PartAttention(nn.Module):
             # Differentiable union. With straight-through one-hot candidate
             # weights its forward value is the exact hard head union.
             union_gate = 1.0 - torch.prod(1.0 - head_gate, dim=1)
-            return union_gate.detach().bool(), union_gate
+            return union_gate.detach().bool(), union_gate, saliency
 
         keep = max(1, int(num_patches * self.ratio))
         mask = torch.zeros(
@@ -75,7 +79,7 @@ class PartAttention(nn.Module):
         # separate top-k/scatter pair for each attention head.
         indices = cls_attention.topk(keep, dim=2).indices
         mask.scatter_(1, indices.reshape(batch_size, num_heads * keep), True)
-        return mask
+        return mask, saliency
 
 
 class SFTS(nn.Module):
@@ -83,7 +87,9 @@ class SFTS(nn.Module):
 
     Each modality first produces a per-head attention mask. The masks are
     united across heads and modalities, then united with the optional
-    frequency mask exactly as in the official EDITOR implementation.
+    frequency mask exactly as in the official EDITOR implementation. When
+    requested, each modality also summarizes patches outside that shared mask
+    into one residual token without changing the paper-faithful hard mask.
     """
 
     def __init__(self, ratio=0.5, learnable_k=False, k_candidates=None,
@@ -132,6 +138,19 @@ class SFTS(nn.Module):
         return torch.softmax(self.k_logits.detach(), dim=0)
 
     @staticmethod
+    def _residual_token(features, shared_mask, saliency):
+        """Attention-weighted summary of patches excluded by the union mask."""
+        patches = features[:, 1:, :]
+        dropped = ~shared_mask
+        weights = saliency.to(dtype=patches.dtype) * dropped.to(patches.dtype)
+        denominator = weights.sum(dim=1, keepdim=True)
+        residual = torch.einsum('bn,bnd->bd', weights, patches)
+        residual = residual / denominator.clamp_min(1e-12)
+        # A full mask has no residual evidence. Keep the summary exactly zero
+        # instead of relying on division by the clamped denominator.
+        return torch.where(denominator > 0, residual, torch.zeros_like(residual))
+
+    @staticmethod
     def _mask_features(features, mask):
         patches = features[:, 1:, :] * mask.unsqueeze(-1).to(features.dtype)
         return torch.cat((features[:, :1, :], patches), dim=1)
@@ -139,7 +158,8 @@ class SFTS(nn.Module):
     def forward(self, RGB_feat, RGB_attn, NIR_feat=None, NIR_attn=None,
                 TIR_feat=None, TIR_attn=None, img_path=None, writer=None,
                 epoch=None, mask_fre=None, quality_scores=None,
-                return_scores=False, return_gates=False):
+                return_scores=False, return_gates=False,
+                return_residual_tokens=False):
         del img_path, quality_scores
         if return_scores:
             raise ValueError("SFTS provides a hard mask, not continuous scores")
@@ -153,15 +173,16 @@ class SFTS(nn.Module):
         candidate_weights = self._candidate_weights(epoch)
         shared_mask = None
         shared_gate = None
+        modality_saliency = []
         for _, features, attentions in modalities:
             if attentions is None:
                 raise ValueError("SFTS requires attention maps for every modality")
             if self.learnable_k:
-                modality_mask, modality_gate = self.part_select(
+                modality_mask, modality_gate, saliency = self.part_select(
                     attentions, candidate_weights=candidate_weights,
                     candidates=self.k_candidates)
             else:
-                modality_mask = self.part_select(attentions)
+                modality_mask, saliency = self.part_select(attentions)
                 modality_gate = modality_mask.to(features.dtype)
             if modality_mask.shape[1] != features.shape[1] - 1:
                 raise ValueError("SFTS attention and feature patch counts differ")
@@ -169,6 +190,7 @@ class SFTS(nn.Module):
                            else shared_mask | modality_mask)
             shared_gate = (modality_gate if shared_gate is None else
                            1.0 - (1.0 - shared_gate) * (1.0 - modality_gate))
+            modality_saliency.append(saliency)
 
         if mask_fre is not None:
             if mask_fre.shape != shared_mask.shape:
@@ -210,4 +232,11 @@ class SFTS(nn.Module):
         if return_gates:
             gate = shared_gate.to(RGB_feat.dtype)
             result += (tuple(gate for _ in modalities),)
+        if return_residual_tokens:
+            residual_tokens = tuple(
+                self._residual_token(features, shared_mask, saliency)
+                for (_, features, _), saliency in zip(
+                    modalities, modality_saliency)
+            )
+            result += (residual_tokens,)
         return result

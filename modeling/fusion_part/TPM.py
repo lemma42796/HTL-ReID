@@ -254,19 +254,67 @@ class AdaptiveRoutingStage(nn.Module):
         )
 
 
+class FinalSelfRefinement(nn.Module):
+    """Let an adaptively routed CLS finally recover its own local evidence."""
+
+    def __init__(self, dim, num_heads, scale_init=0.1):
+        super().__init__()
+        if float(scale_init) < 0.0:
+            raise ValueError('FACR self-refinement scale must be non-negative')
+        self.query_norm = nn.LayerNorm(dim)
+        self.attn = ScoreBiasedCrossAttention(
+            dim, num_heads=num_heads, score_bias_scale=0.0)
+        self.residual_scale = nn.Parameter(
+            torch.full((dim,), float(scale_init)))
+
+    @staticmethod
+    def _replace_cls(feat, cls):
+        return torch.cat([cls.unsqueeze(1), feat[:, 1:, :]], dim=1)
+
+    def forward(self, feat, mask=None, residual_token=None):
+        target = feat[:, 0, :]
+        source_tokens = feat[:, 1:, :]
+        attention_mask = mask
+        if residual_token is not None:
+            if residual_token.shape != target.shape:
+                raise ValueError(
+                    'SFTS residual token must match the FACR class-token shape')
+            source_tokens = torch.cat(
+                [source_tokens, residual_token.unsqueeze(1)], dim=1)
+            if attention_mask is None:
+                attention_mask = torch.ones(
+                    target.size(0), source_tokens.size(1),
+                    device=target.device, dtype=target.dtype)
+            else:
+                summary_gate = torch.ones(
+                    target.size(0), 1,
+                    device=attention_mask.device, dtype=attention_mask.dtype)
+                attention_mask = torch.cat(
+                    [attention_mask, summary_gate], dim=1)
+
+        context = self.attn(
+            self.query_norm(target), source_tokens, mask=attention_mask)
+        refined = target + self.residual_scale.to(context.dtype) * context
+        return self._replace_cls(feat, refined)
+
+
 class FACR(nn.Module):
     """FACSS-guided Adaptive Cross-modal Routing.
 
     Unlike fixed-cycle TPM, every target modality reads both other modalities.
     FACSS scores bias patch attention continuously, while a learned route and
     per-channel residual gate control source and injection strength per sample.
+    An optional final refinement lets each routed class token read its own
+    selected patches and SFTS residual summary.
     """
 
     def __init__(self, dim, num_heads=12, steps=3, score_bias_scale=0.25,
                  score_floor=0.05, detach_scores=True, gate_init_bias=0.0,
-                 route_balance_weight=0.0):
+                 route_balance_weight=0.0, self_refine=False,
+                 self_refine_scale_init=0.1):
         super().__init__()
         self.route_balance_weight = float(route_balance_weight)
+        self.self_refine_enabled = bool(self_refine)
         if self.route_balance_weight < 0.0:
             raise ValueError('FACR route balance weight must be non-negative')
         self.stages = nn.ModuleList([
@@ -278,6 +326,10 @@ class FACR(nn.Module):
                 gate_init_bias=gate_init_bias)
             for _ in range(max(1, int(steps)))
         ])
+        if self.self_refine_enabled:
+            self.self_refinement = FinalSelfRefinement(
+                dim, num_heads=num_heads,
+                scale_init=self_refine_scale_init)
         self.apply(TPM._init_weights)
         # Restore neutral initial routing/gating after generic initialization.
         for stage in self.stages:
@@ -286,16 +338,29 @@ class FACR(nn.Module):
             nn.init.zeros_(stage.gate.weight)
             nn.init.constant_(stage.gate.bias, float(gate_init_bias))
 
-    def forward(self, rgb, nir, tir, scores=None, masks=None):
+    def forward(self, rgb, nir, tir, scores=None, masks=None,
+                residual_tokens=None):
         if scores is not None and len(scores) != 3:
             raise ValueError('FACR requires one FACSS score tensor per modality')
         if masks is not None and len(masks) != 3:
             raise ValueError('FACR requires one FACSS mask tensor per modality')
+        if residual_tokens is not None and len(residual_tokens) != 3:
+            raise ValueError('FACR requires one SFTS residual token per modality')
+        if residual_tokens is not None and not self.self_refine_enabled:
+            raise ValueError('SFTS residual tokens require FACR self-refinement')
         feats = (rgb, nir, tir)
         for stage in self.stages:
             feats = stage(feats, scores=scores, masks=masks)
             if self.route_balance_weight == 0.0:
                 stage._last_route_weights = stage._last_route_weights.detach()
+        if self.self_refine_enabled:
+            masks = masks or (None, None, None)
+            residual_tokens = residual_tokens or (None, None, None)
+            feats = tuple(
+                self.self_refinement(feat, mask=mask, residual_token=residual)
+                for feat, mask, residual in zip(
+                    feats, masks, residual_tokens)
+            )
         return torch.cat([feat[:, 0, :] for feat in feats], dim=-1)
 
     def regularization_loss(self, reference):
