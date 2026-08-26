@@ -1,124 +1,160 @@
 #!/usr/bin/env python3
-"""Shut down an AutoDL instance after one validated aggregate run finishes."""
+"""Safely power off a training host after one registered run finishes.
+
+The watcher refuses to shut down unless all of the following are true:
+
+1. The watched PID initially belongs to the expected runner command (unless it
+   has already exited).
+2. The watched process exits without its PID being reused by another command.
+3. The registered output directory contains a DONE or FAILED marker.
+4. The caller explicitly passes --poweroff (or uses --dry-run for validation).
+
+A non-blocking lock in the output directory prevents duplicate watchers.
+"""
 
 import argparse
-import datetime as dt
+import fcntl
+import json
 import os
+import shutil
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 
-OUTPUT_ROOT = Path("/root/autodl-tmp/outputs/HTL-ReID").resolve()
-SHUTDOWN_COMMAND = Path("/usr/bin/shutdown")
-
-
-def timestamp():
-    return dt.datetime.now().astimezone().isoformat(timespec="seconds")
-
-
 def log(message):
-    print("{} {}".format(timestamp(), message), flush=True)
+    stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    print("{} {}".format(stamp, message), flush=True)
 
 
-def command_line(pid):
+def read_command(pid):
     try:
-        raw = Path("/proc/{}/cmdline".format(pid)).read_bytes()
-    except (FileNotFoundError, ProcessLookupError, PermissionError):
-        return ""
-    return raw.replace(b"\0", b" ").decode("utf-8", errors="replace").strip()
+        payload = Path("/proc/{}/cmdline".format(pid)).read_bytes()
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+    except PermissionError as exc:
+        raise RuntimeError(
+            "cannot inspect watched PID {}: {}".format(pid, exc)) from exc
+    return payload.replace(b"\0", b" ").decode("utf-8", errors="replace").strip()
 
 
-def active_train_pids():
-    pids = []
-    for proc_dir in Path("/proc").iterdir():
-        if not proc_dir.name.isdigit():
-            continue
-        cmd = command_line(int(proc_dir.name))
-        if "train_net.py" in cmd:
-            pids.append(int(proc_dir.name))
-    return sorted(pids)
+def wait_for_runner(pid, expected_command, poll_seconds):
+    command = read_command(pid)
+    if command is None:
+        log("watched PID {} has already exited".format(pid))
+        return
+    if expected_command not in command:
+        raise RuntimeError(
+            "PID {} does not match expected command {!r}: {}".format(
+                pid, expected_command, command))
+
+    log("watching PID {}: {}".format(pid, command))
+    while True:
+        time.sleep(poll_seconds)
+        command = read_command(pid)
+        if command is None:
+            log("watched PID {} exited".format(pid))
+            return
+        if expected_command not in command:
+            raise RuntimeError(
+                "PID {} was reused or changed command before completion: {}".format(
+                    pid, command))
 
 
-def validate_run_dir(path):
-    resolved = path.resolve()
-    if resolved.parent != OUTPUT_ROOT:
-        raise ValueError("run directory must be a direct child of {}".format(OUTPUT_ROOT))
-    if not resolved.name.startswith("fusion_E006-E008_"):
-        raise ValueError("refusing unrelated run directory {}".format(resolved))
-    if not resolved.is_dir():
-        raise FileNotFoundError(resolved)
-    if not resolved.joinpath("plan.json").is_file():
-        raise FileNotFoundError("missing plan.json under {}".format(resolved))
-    return resolved
+def wait_for_marker(output_dir, grace_seconds, poll_seconds):
+    deadline = time.monotonic() + grace_seconds
+    while True:
+        for name in ("DONE", "FAILED"):
+            marker = output_dir / name
+            if marker.is_file():
+                log("confirmed completion marker {}".format(marker))
+                return marker
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                "runner exited but no DONE/FAILED marker appeared within {:.1f}s".format(
+                    grace_seconds))
+        time.sleep(min(poll_seconds, max(deadline - time.monotonic(), 0.05)))
+
+
+def acquire_lock(output_dir):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = output_dir / ".shutdown_after_run.lock"
+    handle = lock_path.open("a+", encoding="utf-8")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        handle.close()
+        raise RuntimeError(
+            "another shutdown watcher already holds {}".format(lock_path)) from exc
+    return handle
+
+
+def write_audit(output_dir, marker, mode):
+    path = output_dir / (
+        "SHUTDOWN_DRY_RUN_OK" if mode == "dry-run" else "SHUTDOWN_REQUESTED")
+    payload = {
+        "time": datetime.now().astimezone().isoformat(),
+        "completion_marker": str(marker),
+        "mode": mode,
+    }
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8")
+    return path
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--run-dir", type=Path, required=True)
-    parser.add_argument("--runner-pid", type=int, required=True)
-    parser.add_argument("--poll-seconds", type=int, default=30)
+    parser.add_argument("--pid", type=int, required=True)
+    parser.add_argument("--expected-command", required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--poll-seconds", type=float, default=20.0)
+    parser.add_argument("--marker-grace-seconds", type=float, default=120.0)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--dry-run", action="store_true")
+    mode.add_argument("--poweroff", action="store_true")
     args = parser.parse_args()
 
-    run_dir = validate_run_dir(args.run_dir)
-    if args.poll_seconds < 5:
-        raise ValueError("poll interval must be at least 5 seconds")
-    initial_cmd = command_line(args.runner_pid)
-    if "run_rgbnt201_fusion.py" not in initial_cmd:
-        raise RuntimeError(
-            "PID {} is not the fusion runner: {}".format(args.runner_pid, initial_cmd))
-    if not SHUTDOWN_COMMAND.is_file():
-        raise FileNotFoundError(SHUTDOWN_COMMAND)
+    if args.pid <= 1:
+        parser.error("--pid must identify a non-system process")
+    if args.poll_seconds <= 0.0:
+        parser.error("--poll-seconds must be positive")
+    if args.marker_grace_seconds < 0.0:
+        parser.error("--marker-grace-seconds must be non-negative")
 
-    log("monitoring runner PID {} for {}".format(args.runner_pid, run_dir))
-    while True:
-        marker = None
-        for name in ("DONE", "FAILED"):
-            candidate = run_dir / name
-            if candidate.is_file():
-                marker = candidate
-                break
+    output_dir = args.output_dir.resolve()
+    lock_handle = acquire_lock(output_dir)
 
-        if marker is not None:
-            train_pids = active_train_pids()
-            if train_pids:
-                log("{} exists but train processes remain {}; waiting".format(
-                    marker.name, train_pids))
-                time.sleep(args.poll_seconds)
-                continue
-            request = run_dir / "SHUTDOWN_REQUESTED"
-            request.write_text(
-                "{} marker={} runner_pid={}\n".format(
-                    timestamp(), marker.name, args.runner_pid),
-                encoding="utf-8",
-            )
-            log("{} confirmed and no train process remains; requesting AutoDL shutdown".format(
-                marker.name))
-            os.sync()
-            # AutoDL provides /usr/bin/shutdown as a shell command rather than
-            # a directly executable binary, so invoke it through bash.
-            completed = subprocess.run(
-                ["/bin/bash", "-lc", str(SHUTDOWN_COMMAND)],
-                check=False,
-                timeout=30,
-            )
-            if completed.returncode != 0:
-                log("shutdown command failed with return code {}".format(
-                    completed.returncode))
-                return 3
-            return 0
+    shutdown_path = shutil.which("shutdown")
+    if args.poweroff and shutdown_path is None:
+        raise RuntimeError("shutdown command is unavailable")
 
-        current_cmd = command_line(args.runner_pid)
-        if "run_rgbnt201_fusion.py" not in current_cmd:
-            log("runner exited without DONE/FAILED marker; refusing shutdown")
-            run_dir.joinpath("SHUTDOWN_REFUSED").write_text(
-                "{} runner exited without aggregate marker\n".format(timestamp()),
-                encoding="utf-8",
-            )
-            return 2
-        time.sleep(args.poll_seconds)
+    wait_for_runner(args.pid, args.expected_command, args.poll_seconds)
+    marker = wait_for_marker(
+        output_dir, args.marker_grace_seconds, args.poll_seconds)
+
+    if args.dry_run:
+        audit = write_audit(output_dir, marker, "dry-run")
+        log("dry-run complete; would execute: shutdown -h now")
+        log("wrote audit marker {}".format(audit))
+        return 0
+
+    audit = write_audit(output_dir, marker, "poweroff")
+    log("wrote audit marker {}".format(audit))
+    log("syncing filesystems before poweroff")
+    subprocess.run(["sync"], check=True)
+    log("executing {} -h now".format(shutdown_path))
+    subprocess.run([shutdown_path, "-h", "now"], check=True)
+    # Keep the lock file descriptor alive until the shutdown command returns.
+    lock_handle.close()
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        log("refusing to power off: {}".format(exc))
+        raise
