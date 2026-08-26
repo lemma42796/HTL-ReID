@@ -32,7 +32,7 @@ OUTPUT_NAMES = {
 }
 TIME_LIMIT = "30m"
 TRAIN_EPOCHS = 20
-SEED = 1111
+DEFAULT_SEED = 1111
 BATCH_SIZE = 40
 EVAL_PERIOD = 1
 
@@ -45,16 +45,17 @@ RANK_PATTERNS = {
 }
 
 
-def resolve_config(row_config, output_dir):
+def resolve_config(row_config, output_dir, seed=DEFAULT_SEED):
     cfg = default_cfg.clone()
     cfg.merge_from_file(BASE_CONFIG)
     cfg.merge_from_file(row_config)
     cfg.OUTPUT_DIR = str(output_dir)
     cfg.SOLVER.EVAL_PERIOD = EVAL_PERIOD
+    cfg.SOLVER.SEED = int(seed)
     if int(cfg.SOLVER.TRAIN_EPOCHS) != TRAIN_EPOCHS:
         raise ValueError("all fusion rows must train for exactly 20 epochs")
-    if int(cfg.SOLVER.SEED) != SEED:
-        raise ValueError("all fusion rows must use seed 1111")
+    if int(cfg.SOLVER.SEED) != int(seed):
+        raise ValueError("fusion row seed override was not applied")
     if int(cfg.SOLVER.IMS_PER_BATCH) != BATCH_SIZE:
         raise ValueError("all fusion rows must use batch size 40")
     if str(cfg.TEST.RE_RANKING).lower() != "no":
@@ -105,7 +106,7 @@ def run_row(args, timeout_bin, commit, experiment, row, row_config,
             output_name=None):
     output_dir = args.output_root / (output_name or OUTPUT_NAMES[row])
     output_dir.mkdir(parents=True)
-    cfg = resolve_config(row_config, output_dir)
+    cfg = resolve_config(row_config, output_dir, seed=args.seed)
     output_dir.joinpath("resolved_config.yml").write_text(cfg.dump(), encoding="utf-8")
     output_dir.joinpath("commit.txt").write_text(commit + "\n", encoding="utf-8")
     command = [
@@ -115,6 +116,7 @@ def run_row(args, timeout_bin, commit, experiment, row, row_config,
         "--config_file", row_config,
         "OUTPUT_DIR", str(output_dir),
         "SOLVER.EVAL_PERIOD", str(EVAL_PERIOD),
+        "SOLVER.SEED", str(args.seed),
     ]
     output_dir.joinpath("command.txt").write_text(
         " ".join(command) + "\n", encoding="utf-8")
@@ -164,9 +166,12 @@ def main():
     parser.add_argument("--single-row")
     parser.add_argument("--single-config")
     parser.add_argument("--single-output-name")
+    parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     args = parser.parse_args()
     args.repo_root = args.repo_root.resolve()
     args.output_root = args.output_root.resolve()
+    if args.seed < 0:
+        parser.error("--seed must be non-negative")
 
     single_values = (
         args.single_experiment, args.single_row,
@@ -183,7 +188,7 @@ def main():
     plan = []
     for experiment, row, row_config in rows:
         output_dir = args.output_root / output_names[row]
-        resolve_config(row_config, output_dir)
+        resolve_config(row_config, output_dir, seed=args.seed)
         plan.append({
             "experiment": experiment,
             "row": row,
@@ -191,7 +196,7 @@ def main():
             "row_config": row_config,
             "output_dir": str(output_dir),
             "dataset": "RGBNT201",
-            "seed": SEED,
+            "seed": args.seed,
             "batch_size": BATCH_SIZE,
             "epochs": TRAIN_EPOCHS,
             "eval_period": EVAL_PERIOD,
