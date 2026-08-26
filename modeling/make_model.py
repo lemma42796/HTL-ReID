@@ -282,6 +282,8 @@ class HTLReID(nn.Module):
         self.use_facr = bool(cfg.MODEL.FACR)
         self.facr_use_scores = bool(cfg.MODEL.FACR_USE_SCORES)
         self.facr_use_masks = bool(cfg.MODEL.FACR_USE_MASKS)
+        self.facr_independent_aggregation = bool(
+            cfg.MODEL.FACR_INDEPENDENT_AGG)
         self.facr_self_refine = bool(cfg.MODEL.FACR_SELF_REFINE)
         self._last_facr_stats_epoch = None
         if sum((self.use_agf, self.use_tpm, self.use_facr)) > 1:
@@ -293,6 +295,11 @@ class HTLReID(nn.Module):
             raise ValueError('FACR_USE_MASKS requires FACSS or SFTS')
         if self.facr_self_refine and not self.use_facr:
             raise ValueError('FACR_SELF_REFINE requires FACR')
+        if self.facr_independent_aggregation and not self.use_facr:
+            raise ValueError('FACR_INDEPENDENT_AGG requires FACR')
+        if self.facr_independent_aggregation and not self.facr_use_masks:
+            raise ValueError(
+                'FACR_INDEPENDENT_AGG requires FACR_USE_MASKS')
         if self.sfts_residual_token and not (
                 self.use_facr and self.facr_use_masks and self.facr_self_refine):
             raise ValueError(
@@ -365,6 +372,7 @@ class HTLReID(nn.Module):
                 route_balance_weight=cfg.MODEL.FACR_ROUTE_BALANCE_WEIGHT,
                 self_refine=self.facr_self_refine,
                 self_refine_scale_init=cfg.MODEL.FACR_SELF_REFINE_SCALE_INIT,
+                independent_aggregation=self.facr_independent_aggregation,
             )
         if self.use_agf:
             self.AGF = AGF(dim=self.BACKBONE.token_dim,

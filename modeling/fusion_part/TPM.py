@@ -254,6 +254,36 @@ class AdaptiveRoutingStage(nn.Module):
         )
 
 
+class IndependentMaskedAggregation(nn.Module):
+    """Refine each modality CLS from its own selected patch tokens.
+
+    This is the independent stage that precedes collaborative FACR routing in
+    T11. One block is shared across modalities so the added capacity does not
+    encode modality-specific parameter-count differences. Patch sequences are
+    preserved; only the class tokens are updated.
+    """
+
+    def __init__(self, dim, num_heads=12):
+        super().__init__()
+        self.block = ResidualCrossAttentionBlock(
+            dim, num_heads=num_heads, score_bias_scale=0.0)
+
+    @staticmethod
+    def _replace_cls(feat, cls):
+        return torch.cat([cls.unsqueeze(1), feat[:, 1:, :]], dim=1)
+
+    def forward(self, feats, masks):
+        if masks is None or len(masks) != len(feats):
+            raise ValueError(
+                'independent masked aggregation requires one mask per modality')
+        refined = []
+        for feat, mask in zip(feats, masks):
+            cls = self.block(
+                feat[:, 0, :], feat[:, 1:, :], mask=mask)
+            refined.append(self._replace_cls(feat, cls))
+        return tuple(refined)
+
+
 class FinalSelfRefinement(nn.Module):
     """Let an adaptively routed CLS finally recover its own local evidence."""
 
@@ -304,6 +334,8 @@ class FACR(nn.Module):
     Unlike fixed-cycle TPM, every target modality reads both other modalities.
     FACSS scores bias patch attention continuously, while a learned route and
     per-channel residual gate control source and injection strength per sample.
+    An optional independent pre-stage first lets each class token read its own
+    masked patches before collaborative routing.
     An optional final refinement lets each routed class token read its own
     selected patches and SFTS residual summary.
     """
@@ -311,12 +343,17 @@ class FACR(nn.Module):
     def __init__(self, dim, num_heads=12, steps=3, score_bias_scale=0.25,
                  score_floor=0.05, detach_scores=True, gate_init_bias=0.0,
                  route_balance_weight=0.0, self_refine=False,
-                 self_refine_scale_init=0.1):
+                 self_refine_scale_init=0.1,
+                 independent_aggregation=False):
         super().__init__()
         self.route_balance_weight = float(route_balance_weight)
         self.self_refine_enabled = bool(self_refine)
+        self.independent_aggregation_enabled = bool(independent_aggregation)
         if self.route_balance_weight < 0.0:
             raise ValueError('FACR route balance weight must be non-negative')
+        if self.independent_aggregation_enabled:
+            self.independent_aggregation = IndependentMaskedAggregation(
+                dim, num_heads=num_heads)
         self.stages = nn.ModuleList([
             AdaptiveRoutingStage(
                 dim, num_heads=num_heads,
@@ -349,6 +386,8 @@ class FACR(nn.Module):
         if residual_tokens is not None and not self.self_refine_enabled:
             raise ValueError('SFTS residual tokens require FACR self-refinement')
         feats = (rgb, nir, tir)
+        if self.independent_aggregation_enabled:
+            feats = self.independent_aggregation(feats, masks)
         for stage in self.stages:
             feats = stage(feats, scores=scores, masks=masks)
             if self.route_balance_weight == 0.0:

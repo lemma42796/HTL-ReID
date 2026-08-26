@@ -27,6 +27,8 @@ Coverage:
      their reference outputs
  18. AdamW uses grouped multi-tensor parameter groups
  19. FACR route balancing is differentiable and disabled by default
+ 20. T11 independent masked aggregation ignores dropped patches, backpropagates,
+     and is disabled for all existing configurations
 
 Run:
     python3 test_pipeline.py
@@ -649,8 +651,97 @@ def test_facr_route_balance_loss():
         balance_loss.item(), route_grad))
 
 
+def test_facr_independent_masked_aggregation():
+    print('[15] FACR pre-routing independent masked aggregation')
+    torch.manual_seed(23)
+    batch, patches, dim = 2, 6, 16
+    features = tuple(
+        torch.randn(batch, patches + 1, dim, requires_grad=True)
+        for _ in range(3)
+    )
+    masks = tuple(
+        torch.tensor(
+            [[1, 1, 0, 0, 1, 0],
+             [1, 0, 1, 0, 0, 1]],
+            dtype=torch.bool)
+        for _ in range(3)
+    )
+    facr = FACR(
+        dim=dim, num_heads=4, steps=1, score_bias_scale=0.0,
+        independent_aggregation=True).train()
+    descriptor = facr(*features, masks=masks)
+    assert descriptor.shape == (batch, 3 * dim)
+    assert torch.isfinite(descriptor).all()
+
+    changed = tuple(feature.detach().clone() for feature in features)
+    for feature, mask in zip(changed, masks):
+        feature[:, 1:, :][~mask] = torch.randn_like(
+            feature[:, 1:, :][~mask]) * 1e4
+    changed_descriptor = facr(*changed, masks=masks)
+    assert torch.allclose(
+        descriptor.detach(), changed_descriptor, atol=1e-5, rtol=1e-5)
+
+    descriptor.square().mean().backward()
+    independent_parameters = [
+        parameter for name, parameter in facr.named_parameters()
+        if name.startswith('independent_aggregation.') and parameter.requires_grad
+    ]
+    assert independent_parameters
+    assert all(
+        parameter.grad is not None and torch.isfinite(parameter.grad).all()
+        for parameter in independent_parameters)
+
+    disabled = FACR(dim=dim, num_heads=4, steps=1)
+    assert not hasattr(disabled, 'independent_aggregation')
+    try:
+        facr(*tuple(feature.detach() for feature in features))
+    except ValueError as exc:
+        assert 'one mask per modality' in str(exc)
+    else:
+        raise AssertionError('T11 must reject a missing selection mask')
+
+    cfg = default_cfg.clone()
+    cfg.merge_from_file(PAPER_BASE)
+    cfg.merge_from_file(
+        'configs/RGBNT201/fusion/t11_sfts_k1_independent_facr.yml')
+    assert cfg.MODEL.SFTS_ENABLED
+    assert cfg.MODEL.SFTS_RATIO == 0.003472222222222222
+    assert cfg.MODEL.FACR
+    assert cfg.MODEL.FACR_USE_MASKS
+    assert cfg.MODEL.FACR_INDEPENDENT_AGG
+    assert not cfg.MODEL.FACR_SELF_REFINE
+    assert not cfg.MODEL.FACR_USE_SCORES
+    cfg.MODEL.PRETRAIN_CHOICE = 'self'
+    cfg.MODEL.SIE_CAMERA = False
+    cfg.INPUT.SIZE_TRAIN = [128, 64]
+    cfg.INPUT.SIZE_TEST = [128, 64]
+    model = make_model(cfg, num_class=NUM_CLASSES, camera_num=0).cpu()
+    assert model.facr_independent_aggregation
+    assert model.FACR.independent_aggregation_enabled
+    model.train()
+    inputs = _dummy_batch(cfg)
+    labels = torch.randint(0, NUM_CLASSES, (BATCH,))
+    output = model(inputs, cam_label=None, label=labels, epoch=0)
+    assert len(output) == 5
+    _loss_assembly_like_processor(output).backward()
+    wired_parameters = [
+        parameter for name, parameter in model.named_parameters()
+        if 'FACR.independent_aggregation.' in name and parameter.requires_grad
+    ]
+    assert wired_parameters
+    assert all(
+        parameter.grad is not None and torch.isfinite(parameter.grad).all()
+        for parameter in wired_parameters)
+    model.eval()
+    with torch.no_grad():
+        descriptor = model(inputs, cam_label=None, epoch=0)
+    assert descriptor.shape == (BATCH, 3 * model.BACKBONE.token_dim)
+    assert torch.isfinite(descriptor).all()
+    print('     OK mask invariance, gradients, disabled path, config, and model wiring')
+
+
 def test_paper_model_modes():
-    print('[15] paper M0-M3 end-to-end train/eval smoke')
+    print('[16] paper M0-M3 end-to-end train/eval smoke')
     for row in PAPER_ROWS:
         c = _make_paper_cfg(row)
         c.MODEL.PRETRAIN_CHOICE = 'self'
@@ -681,7 +772,7 @@ def test_paper_model_modes():
 
 
 def test_legacy_a2_quality_frequency():
-    print('[16] legacy-style A2 quality-aware frequency path')
+    print('[17] legacy-style A2 quality-aware frequency path')
     c = _make_legacy_a2_cfg()
     assert c.MODEL.HS_ENABLED
     assert c.MODEL.FACSS_ENABLED
@@ -755,6 +846,7 @@ def main():
     test_optimizer_parameter_groups()
     test_facr_score_bias_starts_from_t2()
     test_facr_route_balance_loss()
+    test_facr_independent_masked_aggregation()
     test_paper_model_modes()
     test_legacy_a2_quality_frequency()
     print('\n=== ALL PIPELINE TESTS PASSED ===')

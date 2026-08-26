@@ -114,6 +114,10 @@ _C.MODEL.FACR_SCORE_BIAS_SCALE = 0.25
 _C.MODEL.FACR_SCORE_FLOOR = 0.05
 _C.MODEL.FACR_DETACH_SCORES = 1
 _C.MODEL.FACR_GATE_INIT_BIAS = 0.0
+# Optional own-modality masked aggregation before collaborative FACR stages.
+# This follows the independent-before-collaborative ordering investigated by
+# T11 while leaving every existing FACR configuration unchanged by default.
+_C.MODEL.FACR_INDEPENDENT_AGG = 0
 # Optional final own-modality patch read after the adaptive cross-modal stages.
 _C.MODEL.FACR_SELF_REFINE = 0
 _C.MODEL.FACR_SELF_REFINE_SCALE_INIT = 0.1
