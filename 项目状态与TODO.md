@@ -4,7 +4,7 @@
 
 ## 一、信息入口
 
-- 最后更新：2026-08-27 01:04 CST
+- 最后更新：2026-08-27 01:34 CST
 - 项目根目录：`/Users/a123/Documents/reid`
 - 代码目录：`/Users/a123/Documents/reid/HTL-ReID`
 - 远端代码目录：`/root/autodl-tmp/HTL-ReID`
@@ -16,7 +16,7 @@
 
 ## 二、当前研究目标
 
-M0–M3、T1–T11、固定K参数敏感性及三seed T2/K1配对实验已经完成。T11的seed 1111大幅提升未在seed 2222下复现，因此K1仍是冻结的RGBNT201最终结构。当前额外实现了待验证T12：在不改变K1/FACR推理路径的前提下，用一个共享、目标模态条件化的训练期token重建头，从另外两个模态预测stop-gradient目标tokens。T12只完成代码和CPU验证，未分配E编号、未启动正式训练，不改变K1结论。
+M0–M3、T1–T12、固定K参数敏感性及三seed T2/K1配对实验已经完成。T11的seed 1111大幅提升未在seed 2222下复现，因此K1仍是冻结的RGBNT201最终结构。T12在不改变K1/FACR推理路径的前提下，增加共享、目标模态条件化的训练期token重建头；E029/seed 1111取得65.82 mAP、67.58 Rank-1，相对同seed K1提升2.51/0.59并通过预设晋级门槛。下一步只做冻结配置的seed 2222配对验证，在复现前不替换K1。
 
 当前融合实验：
 
@@ -33,7 +33,7 @@ M0–M3、T1–T11、固定K参数敏感性及三seed T2/K1配对实验已经完
 | T10 / E021、E024 | K=1 SFTS丢弃信息摘要 + masked FACR自细化 | 额外seed未复现优势；不作为最终精度候选 |
 | T2/K1三seed / E007、E015、E022、E023、E025、E026 | 全tokens T2 vs 固定K=1 SFTS + FACR | K1平均mAP略高且Rank-1三次一致领先；锁定K1 |
 | T11 / E027、E028 | K1 + FACR前置独立masked aggregation | seed 1111大幅提升，但seed 2222的mAP/Rank-1均略低于K1；不替换最终K1 |
-| T12 / E029 | K1 + 训练期共享跨模态token重建 | 检验CRM式密集特征监督能否补足共享ViT的表征容量；seed 1111运行中 |
+| T12 / E029 | K1 + 训练期共享跨模态token重建 | seed 1111相对K1提升2.51 mAP、0.59 Rank-1；通过额外seed晋级门槛 |
 
 TPM只作为TOP-ReID引用复现，不能改名冒充原创。FACR的实质差异是固定循环变为样本自适应全连接路由；FACSS连续分数、T10残差摘要和自细化均已被稳定性实验排除出最终主线。
 
@@ -91,11 +91,11 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 
 ## 四、代码与验证状态
 
-- GitHub及新训练机仍为`a78c007`；当前本地工作区基于该提交新增了默认关闭的T12训练期共享跨模态token重建能力，尚未提交或同步远端。默认配置、K1/T11配置与旧checkpoint结构不变。E020/E021训练时runner记录的HEAD仍为`7886101`，但其工作区快照与随后冻结的`bc4e0bb`一致。E006–E008训练代码快照为`1b2aa71`，E009训练代码快照为`e2af604`，E014训练代码快照为`df17584`，E015–E018训练代码快照为`2cc3438`。
-- 核心提交：`0089f1b`（TPM/FACR/FACSS接口）、`157a99c`（CUDA测试入口）、`1b2aa71`（E006–E008顺序runner）、`e2af604`（零初始化有界评分偏置及单实验runner）、`7886101`（可选FACR批级路由均衡损失与统计）、`bc4e0bb`（SFTS丢弃信息残差摘要与FACR最终自细化）、`32bbc7b`（融合runner显式seed覆盖）、`a78c007`（FACR前置独立masked aggregation与T11）。
+- T12代码已提交并用于E029正式训练，训练代码快照为`0daf4d2`；能力默认关闭，K1/T11配置与旧checkpoint结构不变。E020/E021训练时runner记录的HEAD仍为`7886101`，但其工作区快照与随后冻结的`bc4e0bb`一致。E006–E008训练代码快照为`1b2aa71`，E009训练代码快照为`e2af604`，E014训练代码快照为`df17584`，E015–E018训练代码快照为`2cc3438`。
+- 核心提交：`0089f1b`（TPM/FACR/FACSS接口）、`157a99c`（CUDA测试入口）、`1b2aa71`（E006–E008顺序runner）、`e2af604`（零初始化有界评分偏置及单实验runner）、`7886101`（可选FACR批级路由均衡损失与统计）、`bc4e0bb`（SFTS丢弃信息残差摘要与FACR最终自细化）、`32bbc7b`（融合runner显式seed覆盖）、`a78c007`（FACR前置独立masked aggregation与T11）、`0daf4d2`（训练期共享跨模态token重建与T12）。
 - 核心代码：`modeling/fusion_part/TPM.py`、`modeling/fusion_part/HS_FACSS.py`、`modeling/fusion_part/CrossModalReconstruction.py`、`modeling/make_model.py`。
 - 配置：`configs/RGBNT201/fusion/t1_tpm.yml`、`t2_adaptive_routing.yml`、`t3_m2_facr.yml`、`t7_sfts_fixed_k16_facr.yml`、`t8_sfts_fixed_k16_route_balance.yml`、`t9_facr_self_refine.yml`、`t10_sfts_k1_residual_facr.yml`、`t11_sfts_k1_independent_facr.yml`、`t12_sfts_k1_shared_token_recon.yml`。
-- T1–T12相关CPU前向、反向、mask不变性、T12目标隔离/stop-gradient/评估旁路与完整模型接线测试已通过；既有RTX 5090路径保持兼容，但T12尚未进行CUDA smoke或正式训练。
+- T1–T12相关CPU前向、反向、mask不变性、T12目标隔离/stop-gradient/评估旁路与完整模型接线测试已通过；E029已在RTX 5090上完成20 epoch正式训练，无OOM、NaN或timeout。
 - 计算优化已经完成：HS rollout降阶、跨模态相似度复用、动态Top-K与频域mask批量化、训练同步/传输及AdamW参数组优化。
 - T8路由均衡能力已实现并保持默认关闭：`FACR_ROUTE_BALANCE_WEIGHT=0.0`不改变现有配置和checkpoint。E019以0.05正式训练后主指标退化，且路由诊断未发现明显塌缩，因此仅保留该能力用于诊断/消融，不进入最终模型。
 - T9/T10能力已实现且默认关闭：SFTS可输出每模态一个丢弃patch残差摘要，FACR可选最终自模态细化。T9全tokens自细化和T10残差摘要路径均已否定为最终精度方案，仅保留代码用于复现消融。
@@ -132,12 +132,13 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 | E026 / K1-S2 | K1额外seed 3333 | 63.87 | 66.75 | 同seed优于T2；锁定K1最终结构 |
 | E027 / T11 | K1 + FACR前置独立masked aggregation | 66.86 | 69.86 | seed 1111单次大幅提升；E028未复现 |
 | E028 / T11-S1 | T11额外seed 2222 | 64.76 | 67.46 | 较同seed E023/K1主指标-0.17/-0.36；停止追加seed |
+| E029 / T12 | K1 + 训练期共享跨模态token重建 | 65.82 | 67.58 | 相对同seed K1 +2.51/+0.59；进入seed 2222配对验证 |
 
-所有表中结果均为RGBNT201、batch 40、20 epoch、主结果关闭re-ranking；E001–E021及E027使用seed 1111，E022–E024及E028使用seed 2222，E025–E026使用seed 3333。融合实验每个epoch验证，以便与已有最佳epoch选择协议一致。
+所有表中结果均为RGBNT201、batch 40、20 epoch、主结果关闭re-ranking；E001–E021、E027及E029使用seed 1111，E022–E024及E028使用seed 2222，E025–E026使用seed 3333。融合实验每个epoch验证，以便与已有最佳epoch选择协议一致。
 
 ## 六、当前运行状态
 
-- E029/T12已于2026-08-27 01:20 CST启动：commit `0daf4d2`，seed 1111，20 epoch，batch 40，关闭re-ranking；输出目录`/root/autodl-tmp/outputs/HTL-ReID/E029_T12_sfts_k1_shared_token_recon_seed1111`，runner PID 1731。首次检查已正常进入epoch 1，GPU利用率99%、显存约24.3 GiB；不持续轮询。
+- E029/T12已正常完成：commit `0daf4d2`，returncode 0，耗时757.7秒；最佳epoch 20，65.82 mAP、67.58 Rank-1、79.43 Rank-5、85.65 Rank-10。相对同seed E015/K1提升2.51/0.59/1.20/2.16，通过预设seed 2222晋级门槛；结果JSON、DONE、日志、配置快照、TensorBoard事件和最佳checkpoint均已保留，runner未生成预期的`retention.json`。
 - E028/T11-S1已正常完成：commit `a78c007`，returncode 0，耗时763.2秒；最佳epoch 17，64.76 mAP、67.46 Rank-1、81.46 Rank-5、86.36 Rank-10；实际保留11.6706%。较同seed E023/K1的mAP和Rank-1分别低0.17和0.36，未通过预设门槛，不运行seed 3333。
 - E027/T11已正常完成：commit `a78c007`，returncode 0，耗时771.7秒；最佳epoch 20，66.86 mAP、69.86 Rank-1、82.54 Rank-5、88.16 Rank-10；实际保留11.3782%。相对E015/K1同seed提高3.55/2.87/4.31/4.67，通过预设晋级门槛。
 
@@ -172,8 +173,8 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 
 1. 保持K1为冻结基线和同协议参照，不再改变T11结构；
 2. E028未复现T11对K1的主指标优势，按预设规则不运行T11 seed 3333；T11仅作为单seed正向但不稳定的消融；
-3. E029/T12正在以冻结配置运行；不持续轮询，用户请求状态时再检查结果；
-4. T12预设门槛为相对同seed E015/K1至少+1.0 mAP且Rank-1不下降；未通过则立即停止，通过后才讨论seed 2222，不追加权重搜索；
+3. E029/T12已通过预设门槛；下一次只使用相同配置运行seed 2222配对验证，不追加重建权重搜索；
+4. T12在seed 2222复现前仍是候选，不替换三seed已验证的K1；若同seed主指标未超过E023/K1，则停止T12追加实验；
 5. 在T12是否运行的决策之外，继续以K1进入RGBNT100和MSVR310的跨数据集验证；
 6. 完成M0与K1的参数量、GFLOPs、延迟和显存对比；K1 mask未物理压缩FACR输入，不声称等比例效率收益；
 7. 用三seed统计更新论文方法、消融表、摘要和回复信，主结果报告mean±std。
@@ -193,5 +194,5 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 2. `/Users/a123/Documents/reid/HTL-ReID/实验记录.md`；
 3. `/Users/a123/Documents/reid/HTL-ReID/实验记录/E025_T2_RGBNT201_seed3333.md`、`E026_K1_RGBNT201_seed3333.md`及`实验记录.md`三seed汇总，再按需读取E007、E015、E022和E023；
 4. 如需代码细节，再读`HTL-ReID/modeling/fusion_part/SFTS.py`、`TPM.py`和`modeling/make_model.py`；
-5. 确认GitHub与训练机为`a78c007`，本地基于该提交有待提交T12改动；K1实现保持兼容，T11/T12能力均默认关闭并由独立配置开启；E027/E028已完成，不得重复启动；
-6. K1保持冻结最终结构；T11稳定性验证已停止；E029/T12已启动，不得重复启动。
+5. 确认E029训练代码快照为`0daf4d2`；K1实现保持兼容，T11/T12能力均默认关闭并由独立配置开启；E027–E029均已完成，不得重复启动；
+6. K1保持冻结最终结构；T11稳定性验证已停止；T12只允许下一步冻结配置的seed 2222配对验证。
