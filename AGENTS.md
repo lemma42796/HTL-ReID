@@ -3,6 +3,7 @@
 ## Execution boundary
 
 - Formal training runs, long-running dependency installations, dataset downloads, and large file transfers may be started when the user explicitly requests them.
+- All model-executing tests, including smoke tests, training, validation, evaluation, inference, profiling, and controlled comparisons, must run on a CUDA GPU. Do not silently fall back to CPU; fail clearly when CUDA is unavailable. CPU is permitted only for static checks that do not execute the model, such as configuration parsing, syntax checks, and file inspection.
 - Every training process has a hard wall-clock limit of 30 minutes, including the currently active run. Launch future training with `timeout --signal=TERM --kill-after=10s 30m ...`; never start an uncapped training process.
 - Controlled comparisons must use the same fixed epoch count that fits within the 30-minute cap. Do not let different models train for different epoch counts merely because their throughput differs.
 - Do not continuously watch or frequently poll long-running work. Prefer a detached/background process with output redirected to a log, perform at most one short startup check, then report the command, PID or job identifier, and log/artifact path and return control to the user. Monitor again only when the user explicitly asks for a status update.
