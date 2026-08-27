@@ -1,7 +1,8 @@
 # E034｜RGBNT201 T12 batch 128正常学习率重试
 
-- 状态：待启动
+- 状态：运行中
 - 登记时间：2026-08-27 17:20 CST
+- 开始时间：2026-08-27 17:21 CST
 - 对应论文实验：T12-B128-R1
 - 实验目的：完成E033未实际进入训练的batch 128单变量筛选，在batch 128下恢复或超过E031阶段性最高性能，并验证32 GB RTX 5090稳定性与墙钟时间。
 - 单变量关系：相对E031仅将batch从64改为128；T12结构、输入、seed、epoch、优化器、学习率、warm-up、数据增强与评估协议均一致。E032的低backbone LR factor 0.2不再使用。
@@ -13,6 +14,7 @@
 - Scheduler / warm-up：50 epoch cosine；前10 epoch从0.1倍LR线性warm-up；按epoch步进。
 - 模型设置：共享ViT-B/16；固定K=1 SFTS共享mask；三轮FACR；训练期共享跨模态token重建，hidden dim 256、损失系数0.1、前5 epoch auxiliary warm-up。
 - 预训练权重：`/root/autodl-tmp/pretrained/vit_base_patch16_224_augreg2_in21k_ft_in1k.pth`
+- 训练代码commit：`131d163`
 - 计划命令：`/root/miniconda3/bin/python tools/run_rgbnt201_fusion.py --single-experiment E034 --single-row T12-B128-R1 --single-config configs/RGBNT201/fusion/t12_sfts_k1_shared_token_recon.yml --single-output-name E034_T12_batch128_bb08_seed1111 --seed 1111`；runner内部强制`timeout --signal=TERM --kill-after=10s 30m`。
 - 输出目录：`/root/autodl-tmp/outputs/HTL-ReID/E034_T12_batch128_bb08_seed1111`
 - Runner日志：`/root/autodl-tmp/outputs/HTL-ReID/E034_T12_batch128_bb08_seed1111.runner.log`；该日志位于目标输出目录之外，避免提前创建目标目录触发防覆盖检查。
@@ -20,3 +22,5 @@
 - 墙钟上限：30分钟。
 - 判断口径：完整50 epoch无OOM、NaN、Traceback、超时或显存不稳定；最佳结果至少达到E031的71.54 mAP / 75.24 Rank-1才同时通过稳定性与精度门槛。
 - 是否进入论文：模型尚未定稿，本次仅为batch 128单变量筛选，不触发M0/K1消融。
+- 启动信息：runner PID 5870，GNU timeout PID 5872，训练主进程PID 5873；其余同命令进程为14个DataLoader worker。
+- 启动检查：RTX 5090上CUDA训练已进入epoch 1，batch 128对应每epoch 27 iterations；epoch 1训练与验证正常完成，训练速度约256.1 samples/s，启动阶段主进程显存约3,072 MiB，无OOM、NaN或配置错误。30分钟硬超时命令已生效。按运行纪律不继续轮询。
