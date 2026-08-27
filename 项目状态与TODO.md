@@ -142,7 +142,7 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 
 ## 六、当前运行状态
 
-- E031/T12-R256已预注册，计划使用seed 1111按新论文协议运行一次；输出目录为`/root/autodl-tmp/outputs/HTL-ReID/E031_T12_sfts_k1_shared_token_recon_256x128_seed1111`。启动前仍需完成测试、提交、远端同步和磁盘/数据/权重/进程检查。
+- E031/T12-R256正在第三台RTX 5090机器运行：训练代码commit `9082135`，runner PID 2908；256×128、Adam/batch 64/50 epoch/10-epoch warm-up、seed 1111、关闭re-ranking与30分钟硬超时均已在命令和日志中确认。epoch 1训练完成并进入验证，启动时无OOM、NaN或配置错误；输出目录为`/root/autodl-tmp/outputs/HTL-ReID/E031_T12_sfts_k1_shared_token_recon_256x128_seed1111`，runner日志为`/root/autodl-tmp/outputs/HTL-ReID/E031_T12_256x128.runner.log`。
 - E030/T12-S1已正常完成：commit `0daf4d2`，returncode 0，耗时758.0秒；最佳epoch 16，66.94 mAP、68.90 Rank-1、79.43 Rank-5、85.77 Rank-10。相对同seed E023/K1提升2.01/1.08/0.84/1.80，两个主指标均超过预设对照；结果JSON、DONE、日志、配置快照、TensorBoard事件和最佳checkpoint均已保留，训练进程已退出。基于时间成本，不再运行T12 seed 3333。
 - E029/T12已正常完成：commit `0daf4d2`，returncode 0，耗时757.7秒；最佳epoch 20，65.82 mAP、67.58 Rank-1、79.43 Rank-5、85.65 Rank-10。相对同seed E015/K1提升2.51/0.59/1.20/2.16，通过预设seed 2222晋级门槛；结果JSON、DONE、日志、配置快照、TensorBoard事件和最佳checkpoint均已保留，runner未生成预期的`retention.json`。
 - E028/T11-S1已正常完成：commit `a78c007`，returncode 0，耗时763.2秒；最佳epoch 17，64.76 mAP、67.46 Rank-1、81.46 Rank-5、86.36 Rank-10；实际保留11.6706%。较同seed E023/K1的mAP和Rank-1分别低0.17和0.36，未通过预设门槛，不运行seed 3333。
