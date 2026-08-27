@@ -1,8 +1,9 @@
 # E037｜T12严格确定性CUDA配对验证
 
-- 状态：运行中；DET-A已通过启动检查，DET-B等待DET-A成功完成后顺序启动
+- 状态：已完成；严格确定性配对验证通过
 - 登记时间：2026-08-27 18:15 CST
 - 启动时间：2026-08-27 18:21 CST
+- 完成时间：DET-A 2026-08-27 18:23:22 CST；DET-B 2026-08-27 18:25:17 CST
 - 训练代码commit：`46395b1`
 - 对应实验：DET-A / DET-B
 - 实验目的：修复E031/E036同seed曲线分叉问题，并用两次完全相同的CUDA训练验证采样顺序、T12重建目标、loss和评估指标可重复。
@@ -16,7 +17,8 @@
 - DET-B输出：`/root/autodl-tmp/outputs/HTL-ReID/E037B_T12_determinism_b64_smoke2_seed1111`
 - 执行命令A：`/root/miniconda3/bin/python tools/run_rgbnt201_fusion.py --single-experiment E037-A --single-row DET-A --single-config configs/RGBNT201/fusion/t12_sfts_k1_shared_token_recon_b64_determinism_smoke2.yml --single-output-name E037A_T12_determinism_b64_smoke2_seed1111 --seed 1111 --expected-train-epochs 2 --expected-base-lr 0.00035 --expected-batch-size 64`。
 - 执行命令B：与A相同，仅实验/row/output分别改为`E037-B`、`DET-B`和`E037B_T12_determinism_b64_smoke2_seed1111`。两次runner内部均强制`timeout --signal=TERM --kill-after=10s 30m`。
-- 运行标识：配对编排PID `14698`；启动检查时DET-A runner PID `14699`、timeout PID `14701`、训练主进程PID `14702`。配对runner日志：`/root/autodl-tmp/outputs/HTL-ReID/E037_determinism_pair.runner.log`。
-- 启动检查：仅在远端执行。DET-A已完成epoch 1训练并进入验证；严格确定性算法未报错，无OOM或NaN；训练主进程显存约15,526 MiB。按长任务规则不继续轮询，等待用户下一次明确状态查询。
+- 运行结果：DET-A与DET-B均returncode 0，耗时分别为113.7秒和114.7秒；两次最佳epoch均为2，指标完全相同：52.25 mAP、54.07 Rank-1、67.70 Rank-5、78.83 Rank-10。短测试指标仅用于确定性验证，不作为论文性能结果。
+- 确定性证据：两个`determinism_trace.json`字节完全一致，SHA256均为`5bcc8c06dbaa32a40232e970f38eceb5cc66a507dab930161877d893790d3138`，`cmp`返回0。epoch 1/2采样顺序SHA256分别为`c5ea335606cc7c5409567273ea4842c14aba469032be4c66c8752e6994d2269f`和`464ecbc1fad355031b31b7ca333dce2f9289747b5615c283e128fe765664043f`；重建目标SHA256分别为`91a077f3a068651c258e9f3a4af62071700b01ef2ec73b7d05bc8f775502612b`和`2eedee931941946945d1f0da9878c4508af678cd1e5ef7ebe4e91bc82fddd305`。逐epoch loss、accuracy与评估指标也逐位一致。
+- 运行约束：全部检查和训练均在远端完成；严格确定性算法未报错，无OOM或NaN；启动检查时训练主进程显存约15,526 MiB。未保存checkpoint，其他预期证据齐全。
 - 判断口径：两次均须在CUDA上returncode 0且无确定性算法报错；两个`determinism_trace.json`除输出无关信息外必须字节一致，逐epoch采样SHA256、完整重建目标序列、train loss/accuracy和mAP/Rank指标全部一致。任一项不一致即未修复。
-- 后续：通过后再注册batch 64、train25/max50严格确定性基线；本测试不用于论文精度结果，不触发消融。
+- 结论：严格确定性修复通过，已建立可重复训练基础。下一步注册并运行batch 64、train25/max50严格确定性基线；本测试不用于论文精度结果，不触发消融。

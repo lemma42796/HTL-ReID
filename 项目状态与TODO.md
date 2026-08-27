@@ -4,7 +4,7 @@
 
 ## 一、信息入口
 
-- 最后更新：2026-08-27 18:21 CST
+- 最后更新：2026-08-27 18:25 CST
 - 项目根目录：`/Users/a123/Documents/reid`
 - 代码目录：`/Users/a123/Documents/reid/HTL-ReID`
 - 远端代码目录：`/root/autodl-tmp/HTL-ReID`
@@ -156,7 +156,7 @@ E001–E030均为RGBNT201、batch 40、20 epoch、主结果关闭re-ranking；E0
 
 ## 六、当前运行状态
 
-- E037/DET-A/B已于2026-08-27 18:21 CST在远端启动：训练commit `46395b1`，两次相同seed 1111、batch 64、2 epoch CUDA测试顺序执行；DET-A已完成epoch 1训练并进入验证，严格确定性算法未报错，无OOM或NaN，启动检查显存约15,526 MiB；DET-B等待DET-A成功完成后启动。配对编排PID `14698`，runner日志为`/root/autodl-tmp/outputs/HTL-ReID/E037_determinism_pair.runner.log`。只有采样SHA256、完整目标序列、loss与指标全部一致才算修复；按规则不主动继续轮询。
+- E037/DET-A/B已正常完成，严格确定性修复通过：训练commit `46395b1`；两次相同seed 1111、batch 64、2 epoch CUDA测试均returncode 0，耗时113.7/114.7秒，指标均为52.25 mAP、54.07 Rank-1、67.70 Rank-5、78.83 Rank-10。两个`determinism_trace.json`字节完全一致，SHA256均为`5bcc8c06dbaa32a40232e970f38eceb5cc66a507dab930161877d893790d3138`，采样顺序、完整重建目标、loss、accuracy和逐epoch指标均一致。全部测试在远端完成，无确定性算法报错、OOM或NaN；短测试不作为论文性能结果。
 - E036/T12-B64-REC25已正常完成：训练commit `33b006b`，returncode 0，耗时462.5秒；最佳epoch 24，66.49 mAP、68.06 Rank-1、83.85 Rank-5、88.88 Rank-10，未复现E031。E031/E036解析配置除输出目录与train50→25外完全一致，scheduler horizon均为50，训练代码无差异，但epoch 1曲线已经分叉；因此提前停止不是退化原因，当前同seed训练存在未受控非确定性。E031保留为最高单次结果，但在复现问题解决前不能视为稳定性能。
 - E035/T12-B128-LR2已正常完成：训练commit `1180596`，returncode 0，耗时447.0秒；最佳epoch 19，68.23 mAP、73.68 Rank-1、83.61 Rank-5、87.68 Rank-10。相对E034提高6.92/11.00/8.37/4.07个百分点，证明LR线性翻倍显著修复batch 128退化；相对E031仍低3.31 mAP和1.56 Rank-1，但墙钟缩短50.1%。epoch 25已从最佳点回落，因此无需恢复50 epoch；若继续优化，优先在5e-4至7e-4之间筛LR，或保持物理batch 128并恢复batch 64的Triplet难样本分组。
 - E034/T12-B128-R1已正常完成：训练commit `131d163`，returncode 0，耗时793.0秒；最佳epoch 4，61.31 mAP、62.68 Rank-1、75.24 Rank-5、83.61 Rank-10。相对E031只将batch 64改为128，墙钟缩短102.4秒（11.4%），但mAP/Rank-1下降10.23/12.56个百分点，未通过精度门槛；相对batch 96的E032仅快0.6秒。batch 128能够完成训练，但不能在E031原学习率与50-epoch日程下直接固定使用。
@@ -199,8 +199,8 @@ E001–E030均为RGBNT201、batch 40、20 epoch、主结果关闭re-ranking；E0
 ## 七、下一步
 
 1. 继续完善和筛选模型；E031仅作为当前阶段性最好结果，不围绕尚未定稿的结构补跑消融；
-2. E036证明恢复batch 64仍无法同seed复现E031，且曲线从epoch 1即分叉；停止继续追逐batch/LR单次高点，先修复严格确定性：关闭cuDNN benchmark、启用确定性算法约束、固定DataLoader/sampler与T12重建目标序列，并保存顺序证据；
-3. 确定性修复后先用batch 64、train25/max50复验；只有可重复结果建立后，才继续比较batch 64/128或筛5e-4至7e-4学习率；
+2. E037的两次2-epoch远端CUDA运行trace字节一致，严格确定性修复已验证通过；保留该机制和逐epoch证据，不再使用旧的非确定性结果判断batch/LR优劣；
+3. 下一项正式运行先用batch 64、train25/max50建立严格确定性基线；确认结果后，才继续比较batch 64/128或筛5e-4至7e-4学习率；
 4. 模型结构定稿后，冻结输入尺寸、batch、seed、epoch、优化器、学习率、数据增强和评估口径；若batch 128已验证通过，最终模型及内部消融也统一使用batch 128；
 5. 在完全一致的冻结协议下训练最终模型，再补齐K1和M0消融；若最终结构改变，同步重新定义与之配对的消融链；
 6. 消融完成后再做最终模型、K1和M0推理路径的参数量、GFLOPs、延迟和显存对比；K1 mask未物理压缩FACR输入，不声称等比例效率收益；
