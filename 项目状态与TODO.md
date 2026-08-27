@@ -4,7 +4,7 @@
 
 ## 一、信息入口
 
-- 最后更新：2026-08-27 15:34 CST
+- 最后更新：2026-08-27 18:21 CST
 - 项目根目录：`/Users/a123/Documents/reid`
 - 代码目录：`/Users/a123/Documents/reid/HTL-ReID`
 - 远端代码目录：`/root/autodl-tmp/HTL-ReID`
@@ -12,6 +12,7 @@
 - SSH别名：本机保存的`autodl-reid`与`autodl-reid-new`仍指向上一台机器，连接第三台前必须更新或通过临时SSH配置把`autodl-reid`解析到用户提供的新入口；不得误连旧端点
 - 数据集根目录：`/root/autodl-tmp/datasets`
 - 输出根目录：`/root/autodl-tmp/outputs/HTL-ReID`
+- 执行边界：所有测试和可执行检查一律在远端训练机完成；本地仅用于读取/编辑文件和Git操作。模型相关测试必须使用远端CUDA，不得回退到CPU。
 - 实验索引：`/Users/a123/Documents/reid/HTL-ReID/实验记录.md`
 - 本地资料索引：`/Users/a123/Documents/reid/HTL-ReID/本地资料索引.md`；涵盖父目录中的论文集、旧稿源码/PDF/ZIP、审稿意见、数据归档、第三方官方源码和写作参考
 
