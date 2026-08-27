@@ -86,9 +86,9 @@ SOLVER:
   WARMUP_FACTOR: 0.1
   WARMUP_ITERS: 10
   SCHEDULER_UNIT: 'epoch'
-  # RTX 5090 has sufficient headroom at 256x128; use a larger batch to reduce
-  # steps per epoch while keeping the optimizer and learning rates unchanged.
-  IMS_PER_BATCH: 96
+  # Batch-128 screening protocol requested after E032. Keep the normal E031
+  # optimizer and learning rates so batch size is the only protocol change.
+  IMS_PER_BATCH: 128
   MAX_EPOCHS: 50
   TRAIN_EPOCHS: 50
   SEED: 1111

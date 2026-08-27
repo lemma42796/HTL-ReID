@@ -155,6 +155,7 @@ E001–E030均为RGBNT201、batch 40、20 epoch、主结果关闭re-ranking；E0
 
 ## 六、当前运行状态
 
+- E033/T12-B128已登记、待启动：相对E031只将batch 64改为128，恢复正常backbone LR factor 0.8并保持50 epoch、seed 1111和关闭re-ranking；稳定性与精度必须同时通过，精度门槛为71.54 mAP / 75.24 Rank-1。
 - E032/T12-OPT1已正常完成：训练commit `cd693d1`，returncode 0，耗时793.6秒；最佳epoch 6，67.98 mAP、69.62 Rank-1、80.50 Rank-5、86.48 Rank-10。batch 96运行中显存快照为21,504/32,607 MiB，全程无OOM、NaN、超时或残留进程；结果、日志、配置快照、DONE和最佳checkpoint已保留。相对E031下降3.56 mAP和5.62 Rank-1，而耗时仅缩短101.8秒；由于batch和backbone LR同时变化，不作单因素归因，但不保留factor 0.2的低backbone LR组合。
 - E031/T12-R256已正常完成：训练代码commit `9082135`，returncode 0，耗时895.4秒；最佳epoch 17，71.54 mAP、75.24 Rank-1、83.85 Rank-5、86.72 Rank-10。50个epoch平均0.1996秒/batch，稳定训练快照显存15,600 MiB、GPU利用率92%–96%，无OOM、NaN、超时或残留进程；结果JSON、DONE、配置快照、日志、TensorBoard事件及约431 MB最佳checkpoint均已保留。E031作为batch 64的T12阶段性最好结果保留，不触发当前消融补跑。
 - E030/T12-S1已正常完成：commit `0daf4d2`，returncode 0，耗时758.0秒；最佳epoch 16，66.94 mAP、68.90 Rank-1、79.43 Rank-5、85.77 Rank-10。相对同seed E023/K1提升2.01/1.08/0.84/1.80，两个主指标均超过预设对照；结果JSON、DONE、日志、配置快照、TensorBoard事件和最佳checkpoint均已保留，训练进程已退出。基于时间成本，不再运行T12 seed 3333。
