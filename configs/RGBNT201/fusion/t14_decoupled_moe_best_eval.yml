@@ -1,0 +1,9 @@
+# E044-selected no-TTA descriptor for the E043 best-Rank1 checkpoint.
+# Merge after paper/base.yml and t14_decoupled_moe_warmstart.yml.
+TEST:
+  RE_RANKING: 'no'
+  ORIGINAL_CLS_FEAT: 'concat'
+  ORIGINAL_CLS_FEAT_WEIGHT: 0.5
+  PART_FEAT: 'off'
+  DECOUPLED_MOE_FEAT: 'concat'
+  DECOUPLED_MOE_FEAT_WEIGHT: 1.0
