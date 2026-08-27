@@ -33,7 +33,7 @@ ROWS = [
     ("E004", "M3", "m3", "configs/RGBNT201/paper/m3.yml"),
 ]
 TIME_LIMIT = "30m"
-EXPECTED_TRAIN_EPOCHS = 20
+EXPECTED_TRAIN_EPOCHS = 50
 EXPECTED_SEED = 1111
 
 EPOCH_PATTERN = re.compile(r"Validation Results - Epoch:\s+(\d+)")
@@ -51,7 +51,7 @@ def resolved_cfg(row_config, output_dir):
     cfg.merge_from_file(row_config)
     cfg.OUTPUT_DIR = str(output_dir)
     if int(cfg.SOLVER.TRAIN_EPOCHS) != EXPECTED_TRAIN_EPOCHS:
-        raise ValueError("paper rows must train for exactly 20 epochs")
+        raise ValueError("paper rows must train for exactly 50 epochs")
     if int(cfg.SOLVER.SEED) != EXPECTED_SEED:
         raise ValueError("paper rows must use seed 1111")
     if str(cfg.TEST.RE_RANKING).lower() != "no":

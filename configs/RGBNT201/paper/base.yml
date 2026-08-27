@@ -7,6 +7,7 @@ MODEL:
   STRIDE_SIZE: [16, 16]
   SIE_CAMERA: True
   SIE_VIEW: False
+  SIE_COE: 1.0
   DIST_TRAIN: False
   AL: 1
 
@@ -56,12 +57,12 @@ MODEL:
   AUX_LOSS_WEIGHT: 0.0
 
 INPUT:
-  SIZE_TRAIN: [384, 192]
-  SIZE_TEST: [384, 192]
+  SIZE_TRAIN: [256, 128]
+  SIZE_TEST: [256, 128]
   PROB: 0.5
   RE_PROB: 0.5
   PADDING: 10
-  GRAY_REPLACE_PROB: 0.3
+  GRAY_REPLACE_PROB: 0.0
   MODALITY_DROP_PROB: 0.0
 
 DATASETS:
@@ -74,18 +75,20 @@ DATALOADER:
   NUM_WORKERS: 14
 
 SOLVER:
-  OPTIMIZER_NAME: 'AdamW'
-  BASE_LR: 0.0001
-  BACKBONE_LR_FACTOR: 0.1
+  # Match the strongest fair shared-ViT reference (DeMo*) instead of the
+  # historical 20-epoch diagnostic protocol: Adam with a smaller encoder LR.
+  OPTIMIZER_NAME: 'Adam'
+  BASE_LR: 0.00035
+  BACKBONE_LR_FACTOR: 0.8
   NEW_MODULE_LR_FACTOR: 1.0
-  WEIGHT_DECAY: 0.05
-  WARMUP_ITERS: 20
-  SCHEDULER_UNIT: 'iteration'
-  IMS_PER_BATCH: 40
-  MAX_EPOCHS: 120
-  # Keep the 120-epoch cosine horizon but stop each controlled row at epoch 20
-  # so the run completes inside the mandatory 30-minute wall-clock cap.
-  TRAIN_EPOCHS: 20
+  WEIGHT_DECAY: 0.0001
+  WEIGHT_DECAY_BIAS: 0.0001
+  WARMUP_FACTOR: 0.1
+  WARMUP_ITERS: 10
+  SCHEDULER_UNIT: 'epoch'
+  IMS_PER_BATCH: 64
+  MAX_EPOCHS: 50
+  TRAIN_EPOCHS: 50
   SEED: 1111
   # Validation is relatively expensive; the trainer still always evaluates
   # the final epoch even when it is not divisible by this period.

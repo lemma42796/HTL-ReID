@@ -4,19 +4,19 @@
 
 ## 一、信息入口
 
-- 最后更新：2026-08-27 02:10 CST
+- 最后更新：2026-08-27 15:34 CST
 - 项目根目录：`/Users/a123/Documents/reid`
 - 代码目录：`/Users/a123/Documents/reid/HTL-ReID`
 - 远端代码目录：`/root/autodl-tmp/HTL-ReID`
-- 远端登录：`ssh autodl-reid`
-- SSH别名：`autodl-reid`与`autodl-reid-new`均指向当前新训练机；`autodl-reid-old`保留原机器配置，但最近一次检查不可连接
+- 远端登录：正式命令仍使用`autodl-reid`别名
+- SSH别名：本机保存的`autodl-reid`与`autodl-reid-new`仍指向上一台机器，连接第三台前必须更新或通过临时SSH配置把`autodl-reid`解析到用户提供的新入口；不得误连旧端点
 - 数据集根目录：`/root/autodl-tmp/datasets`
 - 输出根目录：`/root/autodl-tmp/outputs/HTL-ReID`
 - 实验索引：`/Users/a123/Documents/reid/HTL-ReID/实验记录.md`
 
 ## 二、当前研究目标
 
-M0–M3、T1–T12、固定K参数敏感性及三seed T2/K1配对实验已经完成。T11的seed 1111大幅提升未在seed 2222下复现。T12在不改变K1/FACR推理路径的前提下，增加共享、目标模态条件化的训练期token重建头；E029/E030在seed 1111/2222均同时超过配对K1，两次分别提升2.51/0.59和2.01/1.08 mAP/Rank-1，因此T12作为当前优先结构，K1保留为冻结配对基线。基于时间成本，不再追加RGBNT201 seed 3333，后续优先转向跨数据集验证与论文工作。
+M0–M3、T1–T12、固定K参数敏感性及三seed T2/K1配对实验已经完成，但E001–E030均使用384×192与20-epoch诊断协议。T12在seed 1111/2222均同时超过配对K1，因此仍作为当前优先结构；自E031起RGBNT201统一迁移到256×128，并参照非CLIP共享ViT DeMo*采用Adam、batch 64、50 epoch、10-epoch warm-up。旧结果只作为结构筛选证据，论文主表必须补齐新协议下的同条件M0/K1/T12。
 
 当前融合实验：
 
@@ -34,6 +34,7 @@ M0–M3、T1–T12、固定K参数敏感性及三seed T2/K1配对实验已经完
 | T2/K1三seed / E007、E015、E022、E023、E025、E026 | 全tokens T2 vs 固定K=1 SFTS + FACR | K1平均mAP略高且Rank-1三次一致领先；锁定K1 |
 | T11 / E027、E028 | K1 + FACR前置独立masked aggregation | seed 1111大幅提升，但seed 2222的mAP/Rank-1均略低于K1；不替换最终K1 |
 | T12 / E029、E030 | K1 + 训练期共享跨模态token重建 | 两个seed均同时超过配对K1；停止同数据集追加seed，转跨数据集 |
+| T12-R256 / E031 | 冻结T12迁移到256×128论文协议 | 先验证新输入与优化协议；不引入新结构 |
 
 TPM只作为TOP-ReID引用复现，不能改名冒充原创。FACR的实质差异是固定循环变为样本自适应全连接路由；FACSS连续分数、T10残差摘要和自细化均已被稳定性实验排除出最终主线。
 
@@ -44,6 +45,7 @@ TPM只作为TOP-ReID引用复现，不能改名冒充原创。FACR的实质差�
 - `Magic Tokens: Select Diverse Tokens for Multi-modal Object Re-Identification`（EDITOR）提供SFTS的空间/频率token选择、逐head Top-K、跨head/跨模态共享并集，以及HMA“独立聚合后再协同聚合”的层级顺序；项目保留其硬mask选择规则。T11明确借鉴HMA的独立聚合顺序，但只增加共享权重的模态内masked aggregation，后续协同阶段仍为项目FACR，并未复现完整HMA、BCC或OCFR；论文必须引用EDITOR，不能把独立聚合本身宣称为原创；
 - `TOP-ReID: Multi-spectral Object Re-Identification with Token Permutation`提供TPM的CLS读取其他模态patch并循环聚合的直接参考；T1是明确引用的模块复现，FACR则把固定循环改为同时读取两个来源并进行样本自适应路由。T12直接受TOP-ReID CRM的跨模态token重建监督启发，必须明确引用CRM；其工程差异是针对共享ViT使用单个共享、模态条件化的轻量预测器，每批只重建一个目标模态且不进入推理路径，不得将token重建思想宣称为原创；
 - `DeMo: Decoupled Feature-Based Mixture of Experts for Multi-Modal Object Re-Identification`中的ATMoE与FACR都包含按样本动态加权多模态信息的思想，可作为相关工作和概念对照；但现有代码及实验记录没有FACR直接复现或改造ATMoE的证据，不得把DeMo写成FACR的直接代码来源；
+- 公平性能比较口径已经固定：论文主结果定量表删除CLIP-based MambaPro、DeMo†及其指标，不把CLIP方法作为主要追赶对象；主要外部对照限于共享、ImageNet预训练的普通ViT方法。MambaPro与DeMo†只可在Related Work中简短说明方法脉络及预训练差异，不在正文定量主表展示性能数字；
 - T10新增的“将SFTS丢弃patch压缩为每模态一个注意力加权残差摘要，并在FACR后做受限自模态细化”不是上述论文的原有模块，但E024未复现精度优势，因此只能作为项目探索与信息保真消融，不能写成最终贡献。SFTS、TPM、交叉注意力、门控和动态加权本身均不得宣称为原创。
 
 ## 三、当前方法定义
@@ -100,6 +102,7 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 - T8路由均衡能力已实现并保持默认关闭：`FACR_ROUTE_BALANCE_WEIGHT=0.0`不改变现有配置和checkpoint。E019以0.05正式训练后主指标退化，且路由诊断未发现明显塌缩，因此仅保留该能力用于诊断/消融，不进入最终模型。
 - T9/T10能力已实现且默认关闭：SFTS可输出每模态一个丢弃patch残差摘要，FACR可选最终自模态细化。T9全tokens自细化和T10残差摘要路径均已否定为最终精度方案，仅保留代码用于复现消融。
 - T12能力已实现且默认关闭：单个共享重建器每批随机选一个目标模态，目标tokens stop-gradient，仅其他两模态及重建头接受该辅助损失梯度；评估不调用重建头。
+- RGBNT201 paper配置自E031起统一为256×128、Adam、batch 64、50 epoch、10-epoch warm-up和完整cosine；ImageNet ViT backbone LR为2.8e-4，新模块LR为3.5e-4，weight decay为1e-4。ViT-B/16对应128个patch，固定K配置的`SFTS_RATIO`已同步按`K/128`换算；只保留水平翻转、padding/crop和random erasing，关闭灰度块替换与modality dropout。runner会拒绝偏离该协议的RGBNT201正式运行；车辆数据配置未在本次迁移中改动。
 
 ## 五、有效实验结果
 
@@ -139,6 +142,7 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 
 ## 六、当前运行状态
 
+- E031/T12-R256已预注册，计划使用seed 1111按新论文协议运行一次；输出目录为`/root/autodl-tmp/outputs/HTL-ReID/E031_T12_sfts_k1_shared_token_recon_256x128_seed1111`。启动前仍需完成测试、提交、远端同步和磁盘/数据/权重/进程检查。
 - E030/T12-S1已正常完成：commit `0daf4d2`，returncode 0，耗时758.0秒；最佳epoch 16，66.94 mAP、68.90 Rank-1、79.43 Rank-5、85.77 Rank-10。相对同seed E023/K1提升2.01/1.08/0.84/1.80，两个主指标均超过预设对照；结果JSON、DONE、日志、配置快照、TensorBoard事件和最佳checkpoint均已保留，训练进程已退出。基于时间成本，不再运行T12 seed 3333。
 - E029/T12已正常完成：commit `0daf4d2`，returncode 0，耗时757.7秒；最佳epoch 20，65.82 mAP、67.58 Rank-1、79.43 Rank-5、85.65 Rank-10。相对同seed E015/K1提升2.51/0.59/1.20/2.16，通过预设seed 2222晋级门槛；结果JSON、DONE、日志、配置快照、TensorBoard事件和最佳checkpoint均已保留，runner未生成预期的`retention.json`。
 - E028/T11-S1已正常完成：commit `a78c007`，returncode 0，耗时763.2秒；最佳epoch 17，64.76 mAP、67.46 Rank-1、81.46 Rank-5、86.36 Rank-10；实际保留11.6706%。较同seed E023/K1的mAP和Rank-1分别低0.17和0.36，未通过预设门槛，不运行seed 3333。
@@ -174,15 +178,14 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 
 ## 七、下一步
 
-1. T12作为当前优先结构，K1保持为冻结基线和同协议参照，不再改变T11结构；
-2. E028未复现T11对K1的主指标优势，按预设规则不运行T11 seed 3333；T11仅作为单seed正向但不稳定的消融；
-3. E030已通过配对验证；停止RGBNT201上的T12额外seed与重建权重搜索；
-4. 后续优先使用冻结T12配置进入RGBNT100和MSVR310跨数据集验证，不再以同数据集重复seed消耗训练时间；
-5. K1保留为稳定参照；如论文必须补充第三seed，只在用户明确授权后讨论，不默认执行；
-6. 完成M0与T12/K1推理路径的参数量、GFLOPs、延迟和显存对比；K1 mask未物理压缩FACR输入，不声称等比例效率收益；
-7. 用三seed统计更新论文方法、消融表、摘要和回复信，主结果报告mean±std。
+1. 完成E031的256×128论文协议首跑并记录精度、速度、显存和完整产物；
+2. E031若正常，按论文最小需要在相同协议补齐M0与K1；是否增加新协议下的额外seed在首轮结果后再决定，不自动运行；
+3. T12保持当前结构与重建权重，不再改变T11或搜索辅助损失；
+4. RGBNT100和MSVR310按各自横纵比另行冻结配置，不能照搬RGBNT201尺寸；
+5. 完成M0与T12/K1推理路径的参数量、GFLOPs、延迟和显存对比；K1 mask未物理压缩FACR输入，不声称等比例效率收益；
+6. 论文主表只使用同分辨率、同训练协议结果，E001–E030必须明确标为历史结构筛选。
 
-可选性能上限方向（未实现、未授权运行）：当前T12对全部288个patch等权计算重建损失，背景区域可能稀释身份监督。如果跨数据集前仍明确要求只做一次RGBNT201改进，唯一优先候选是使用`detach`后的SFTS共享mask对逐token余弦重建损失加权：被选token高权重、未选token保留低权重并按权重和归一化；总损失系数继续固定0.1，不做网格搜索、不增加推理计算、只按单seed筛选。默认计划仍是直接转跨数据集，不自动启动该实验。
+可选性能上限方向（未实现、未授权运行）：256×128下T12对全部128个patch等权计算重建损失，背景区域仍可能稀释身份监督。如后续明确授权结构改进，唯一优先候选是使用`detach`后的SFTS共享mask加权逐token余弦重建损失；E031不引入该变化，以隔离结构因素。
 
 ## 八、统一约束
 
@@ -200,5 +203,5 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 2. `/Users/a123/Documents/reid/HTL-ReID/实验记录.md`；
 3. `/Users/a123/Documents/reid/HTL-ReID/实验记录/E025_T2_RGBNT201_seed3333.md`、`E026_K1_RGBNT201_seed3333.md`及`实验记录.md`三seed汇总，再按需读取E007、E015、E022和E023；
 4. 如需代码细节，再读`HTL-ReID/modeling/fusion_part/SFTS.py`、`TPM.py`和`modeling/make_model.py`；
-5. 确认E029/E030训练代码快照为`0daf4d2`；K1实现保持兼容，T11/T12能力均默认关闭并由独立配置开启；E027–E030均已完成，不得重复启动；
-6. T11稳定性验证已停止；T12不再运行RGBNT201 seed 3333，下一步优先转跨数据集验证。
+5. 确认E029/E030训练代码快照为`0daf4d2`且输入为384×192；E027–E030均已完成，不得重复启动；
+6. 新RGBNT201正式运行必须读取E031文档并确认256×128、Adam/50 epoch协议、128 patches及固定K比例；T11稳定性验证已停止。

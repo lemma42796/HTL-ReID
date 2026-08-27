@@ -17,7 +17,7 @@ def create_scheduler(cfg, optimizer, num_batches=None):
             raise ValueError("num_batches is required when SOLVER.SCHEDULER_UNIT='iteration'")
         t_initial = cfg.SOLVER.MAX_EPOCHS * num_batches
     lr_min = 0.001 * cfg.SOLVER.BASE_LR
-    warmup_lr_init = 0.01 * cfg.SOLVER.BASE_LR
+    warmup_lr_init = cfg.SOLVER.WARMUP_FACTOR * cfg.SOLVER.BASE_LR
 
     warmup_t = cfg.SOLVER.WARMUP_ITERS
     noise_range = None

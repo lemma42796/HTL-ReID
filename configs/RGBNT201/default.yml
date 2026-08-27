@@ -44,8 +44,8 @@ MODEL:
   AUX_LOSS_WEIGHT: 0.3
   AUX_WARMUP_EPOCHS: 40
 INPUT:
-  SIZE_TRAIN: [ 384, 192 ]
-  SIZE_TEST: [384, 192 ]
+  SIZE_TRAIN: [ 256, 128 ]
+  SIZE_TEST: [256, 128 ]
   PROB: 0.5 # random horizontal flip
   RE_PROB: 0.5 # random erasing
   PADDING: 10

@@ -9,7 +9,7 @@ pretrained weights. This is the test others should run after `pip install
 Coverage:
   1. cfg defaults load and freeze
   2. Each shipped yml config merges cleanly into defaults
-  3. Iteration-based scheduler warmup semantics
+  3. Iteration-based defaults and epoch-based paper scheduler warmup semantics
   4. Model builds for each yml (PRETRAIN_CHOICE forced off so no .pth needed)
   5. 3-modal training forward returns the right tuple length and shapes
   6. 3-modal eval forward
@@ -159,7 +159,7 @@ def test_yml_configs_merge():
 
 
 def test_iteration_scheduler():
-    print('[3] iteration scheduler semantics')
+    print('[3] iteration and paper epoch scheduler semantics')
     c = default_cfg.clone()
     c.SOLVER.MAX_EPOCHS = 2
     c.SOLVER.WARMUP_ITERS = 3
@@ -173,7 +173,25 @@ def test_iteration_scheduler():
     scheduler.step_update(3)
     lr3 = opt.param_groups[0]['lr']
     assert lr3 > lr0, 'warmup lr did not increase: {} -> {}'.format(lr0, lr3)
-    print('     OK lr {:.2e} -> {:.2e}'.format(lr0, lr3))
+
+    paper = default_cfg.clone()
+    paper.merge_from_file(PAPER_BASE)
+    paper_model = torch.nn.Linear(2, 2)
+    paper_opt = torch.optim.Adam(
+        paper_model.parameters(), lr=paper.SOLVER.BASE_LR)
+    paper_scheduler = create_scheduler(paper, paper_opt)
+    assert paper_scheduler.t_in_epochs is True
+    paper_scheduler.step(0)
+    paper_lr0 = paper_opt.param_groups[0]['lr']
+    paper_scheduler.step(9)
+    paper_lr9 = paper_opt.param_groups[0]['lr']
+    paper_scheduler.step(10)
+    paper_lr10 = paper_opt.param_groups[0]['lr']
+    assert abs(paper_lr0 - 0.1 * paper.SOLVER.BASE_LR) < 1e-12
+    assert 0.9 * paper.SOLVER.BASE_LR < paper_lr9 < paper.SOLVER.BASE_LR
+    assert 0.8 * paper.SOLVER.BASE_LR < paper_lr10 < paper_lr9
+    print('     OK iteration {:.2e}->{:.2e}; paper epoch {:.2e}->{:.2e}->{:.2e}'.format(
+        lr0, lr3, paper_lr0, paper_lr9, paper_lr10))
 
 
 def test_three_modal_pipeline(yml):
@@ -652,7 +670,7 @@ def test_facr_route_balance_loss():
     assert cfg.MODEL.FACR
     assert cfg.MODEL.FACR_USE_MASKS
     assert cfg.MODEL.FACR_ROUTE_BALANCE_WEIGHT == 0.05
-    assert cfg.MODEL.SFTS_RATIO == 0.05555555555555555
+    assert cfg.MODEL.SFTS_RATIO == 0.125
     print('     OK loss={:.6f}; route_grad={:.6f}'.format(
         balance_loss.item(), route_grad))
 
@@ -711,7 +729,7 @@ def test_facr_independent_masked_aggregation():
     cfg.merge_from_file(
         'configs/RGBNT201/fusion/t11_sfts_k1_independent_facr.yml')
     assert cfg.MODEL.SFTS_ENABLED
-    assert cfg.MODEL.SFTS_RATIO == 0.003472222222222222
+    assert cfg.MODEL.SFTS_RATIO == 0.0078125
     assert cfg.MODEL.FACR
     assert cfg.MODEL.FACR_USE_MASKS
     assert cfg.MODEL.FACR_INDEPENDENT_AGG
@@ -786,7 +804,7 @@ def test_shared_cross_modal_token_reconstruction():
     cfg.merge_from_file(
         'configs/RGBNT201/fusion/t12_sfts_k1_shared_token_recon.yml')
     assert cfg.MODEL.SFTS_ENABLED
-    assert cfg.MODEL.SFTS_RATIO == 0.003472222222222222
+    assert cfg.MODEL.SFTS_RATIO == 0.0078125
     assert cfg.MODEL.FACR and cfg.MODEL.FACR_USE_MASKS
     assert not cfg.MODEL.FACR_INDEPENDENT_AGG
     assert cfg.MODEL.CROSS_MODAL_RECON_ENABLED

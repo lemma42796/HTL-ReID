@@ -31,10 +31,11 @@ OUTPUT_NAMES = {
     "T3": "E008_T3_m2_facr_seed1111",
 }
 TIME_LIMIT = "30m"
-TRAIN_EPOCHS = 20
+TRAIN_EPOCHS = 50
 DEFAULT_SEED = 1111
-BATCH_SIZE = 40
+BATCH_SIZE = 64
 EVAL_PERIOD = 1
+INPUT_SIZE = (256, 128)
 
 EPOCH_PATTERN = re.compile(r"Validation Results - Epoch:\s+(\d+)")
 MAP_PATTERN = re.compile(r"mAP:\s+([0-9.]+)%")
@@ -53,11 +54,33 @@ def resolve_config(row_config, output_dir, seed=DEFAULT_SEED):
     cfg.SOLVER.EVAL_PERIOD = EVAL_PERIOD
     cfg.SOLVER.SEED = int(seed)
     if int(cfg.SOLVER.TRAIN_EPOCHS) != TRAIN_EPOCHS:
-        raise ValueError("all fusion rows must train for exactly 20 epochs")
+        raise ValueError("all RGBNT201 paper rows must train for exactly 50 epochs")
     if int(cfg.SOLVER.SEED) != int(seed):
         raise ValueError("fusion row seed override was not applied")
     if int(cfg.SOLVER.IMS_PER_BATCH) != BATCH_SIZE:
-        raise ValueError("all fusion rows must use batch size 40")
+        raise ValueError("all RGBNT201 paper rows must use batch size 64")
+    if tuple(cfg.INPUT.SIZE_TRAIN) != INPUT_SIZE:
+        raise ValueError("all RGBNT201 fusion rows must train at 256x128")
+    if tuple(cfg.INPUT.SIZE_TEST) != INPUT_SIZE:
+        raise ValueError("all RGBNT201 fusion rows must test at 256x128")
+    if cfg.SOLVER.OPTIMIZER_NAME != "Adam":
+        raise ValueError("all RGBNT201 paper rows must use Adam")
+    if abs(float(cfg.SOLVER.BASE_LR) - 3.5e-4) > 1e-12:
+        raise ValueError("all RGBNT201 paper rows must use base LR 3.5e-4")
+    backbone_lr = float(cfg.SOLVER.BASE_LR) * float(
+        cfg.SOLVER.BACKBONE_LR_FACTOR)
+    if abs(backbone_lr - 2.8e-4) > 1e-12:
+        raise ValueError("all RGBNT201 paper rows must use backbone LR 2.8e-4")
+    if abs(float(cfg.SOLVER.WARMUP_FACTOR) - 0.1) > 1e-12:
+        raise ValueError("all RGBNT201 paper rows must warm up from 0.1x LR")
+    if int(cfg.SOLVER.WARMUP_ITERS) != 10:
+        raise ValueError("all RGBNT201 paper rows must use 10 warm-up epochs")
+    if str(cfg.SOLVER.SCHEDULER_UNIT).lower() != "epoch":
+        raise ValueError("RGBNT201 paper warm-up and cosine schedule must use epochs")
+    if float(cfg.INPUT.GRAY_REPLACE_PROB) != 0.0:
+        raise ValueError("RGBNT201 paper rows must disable custom grayscale replacement")
+    if float(cfg.INPUT.MODALITY_DROP_PROB) != 0.0:
+        raise ValueError("RGBNT201 paper rows must disable modality dropout")
     if str(cfg.TEST.RE_RANKING).lower() != "no":
         raise ValueError("fusion rows must disable re-ranking")
     if cfg.MODEL.PRETRAIN_CHOICE != "imagenet" or cfg.MODEL.RESUME_PATH:
@@ -198,6 +221,7 @@ def main():
             "dataset": "RGBNT201",
             "seed": args.seed,
             "batch_size": BATCH_SIZE,
+            "input_size": list(INPUT_SIZE),
             "epochs": TRAIN_EPOCHS,
             "eval_period": EVAL_PERIOD,
             "re_ranking": "no",
