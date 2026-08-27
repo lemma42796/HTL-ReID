@@ -1,7 +1,8 @@
 # E035｜RGBNT201 T12 batch 128线性学习率缩放
 
-- 状态：待启动
+- 状态：运行中
 - 登记时间：2026-08-27 17:43 CST
+- 开始时间：2026-08-27 17:45 CST
 - 对应论文实验：T12-B128-LR2
 - 实验目的：在保持batch 128时间优势的前提下，用线性学习率缩放补偿每epoch优化器更新次数由54降至27，并检验能否恢复E031阶段性最高性能。
 - 变化与限制：相对E034将base/new-module LR从3.5e-4提高到7e-4，backbone LR从2.8e-4提高到5.6e-4，并将实际训练长度从50缩短到25 epoch；cosine horizon仍为50 epoch。因同时改变学习率与停止点，本次是快速优化筛选，不作单变量因果归因，也不与最终消融混用。
@@ -13,6 +14,7 @@
 - Scheduler / warm-up：50-epoch cosine horizon；前10 epoch从0.1倍LR线性warm-up；按epoch步进；epoch 25提前停止。
 - 模型设置：共享ViT-B/16；固定K=1 SFTS共享mask；三轮FACR；训练期共享跨模态token重建，hidden dim 256、损失系数0.1、前5 epoch auxiliary warm-up。
 - 预训练权重：`/root/autodl-tmp/pretrained/vit_base_patch16_224_augreg2_in21k_ft_in1k.pth`
+- 训练代码commit：`1180596`
 - 计划命令：`/root/miniconda3/bin/python tools/run_rgbnt201_fusion.py --single-experiment E035 --single-row T12-B128-LR2 --single-config configs/RGBNT201/fusion/t12_sfts_k1_shared_token_recon_b128_lr2x_25e.yml --single-output-name E035_T12_batch128_lr2x_train25_seed1111 --seed 1111 --expected-train-epochs 25 --expected-base-lr 0.0007`；runner内部强制`timeout --signal=TERM --kill-after=10s 30m`。
 - 输出目录：`/root/autodl-tmp/outputs/HTL-ReID/E035_T12_batch128_lr2x_train25_seed1111`
 - Runner日志：`/root/autodl-tmp/outputs/HTL-ReID/E035_T12_batch128_lr2x_train25_seed1111.runner.log`，位于目标输出目录之外。
@@ -20,3 +22,5 @@
 - 墙钟上限：30分钟；预计约6–8分钟，但以实际结果为准。
 - 判断口径：完整25 epoch无OOM、NaN、Traceback、超时或显存不稳定；最佳结果至少达到E031的71.54 mAP / 75.24 Rank-1才通过精度门槛。
 - 是否进入论文：模型尚未定稿，本次仅为优化筛选，不触发M0/K1消融。
+- 启动信息：runner PID 9825，GNU timeout PID 9827，训练主进程PID 9828；其余同命令进程为14个DataLoader worker。
+- 启动检查：RTX 5090上CUDA训练已进入并完成epoch 1训练，batch 128对应每epoch 27 iterations；日志确认`training 25/50 scheduler epochs`，首轮warm-up日志LR为1.19e-4，符合LR翻倍配置。训练速度约257.3 samples/s，启动阶段主进程显存约5,042 MiB，无OOM、NaN或配置错误，30分钟硬超时已生效。按运行纪律不继续轮询。
