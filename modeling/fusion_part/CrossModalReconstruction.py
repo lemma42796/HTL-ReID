@@ -24,7 +24,7 @@ class SharedCrossModalTokenReconstruction(nn.Module):
 
     NUM_MODALITIES = 3
 
-    def __init__(self, dim, hidden_dim=256):
+    def __init__(self, dim, hidden_dim=256, target_seed=0):
         super().__init__()
         self.dim = int(dim)
         self.hidden_dim = int(hidden_dim)
@@ -48,6 +48,9 @@ class SharedCrossModalTokenReconstruction(nn.Module):
             nn.Linear(self.hidden_dim, self.dim),
         )
         nn.init.normal_(self.modality_embedding, std=0.02)
+        self._target_generator = torch.Generator(device='cpu')
+        self._target_generator.manual_seed(int(target_seed))
+        self._target_history = []
         self._last_target_index = None
         self._last_loss = None
 
@@ -91,9 +94,9 @@ class SharedCrossModalTokenReconstruction(nn.Module):
         """Return normalized cosine reconstruction loss for one target."""
         self._validate_features(features)
         if target_index is None:
-            # The global torch RNG is already seeded by the formal runner, so
-            # this per-batch target choice remains reproducible.
-            target_index = int(torch.randint(self.NUM_MODALITIES, (1,)).item())
+            target_index = int(torch.randint(
+                self.NUM_MODALITIES, (1,),
+                generator=self._target_generator).item())
         target_index = int(target_index)
 
         prediction = self.predict(features, target_index)
@@ -103,6 +106,11 @@ class SharedCrossModalTokenReconstruction(nn.Module):
         prediction = F.normalize(prediction.float(), dim=-1, eps=1e-6)
         teacher = F.normalize(teacher.float(), dim=-1, eps=1e-6)
         loss = 1.0 - (prediction * teacher).sum(dim=-1).mean()
+        self._target_history.append(target_index)
         self._last_target_index = target_index
         self._last_loss = loss.detach()
         return loss
+
+    def target_history(self):
+        """Return the deterministic training target sequence for tracing."""
+        return tuple(self._target_history)

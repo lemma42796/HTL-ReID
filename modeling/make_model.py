@@ -393,6 +393,7 @@ class HTLReID(nn.Module):
             self.CROSS_MODAL_RECON = SharedCrossModalTokenReconstruction(
                 dim=self.BACKBONE.token_dim,
                 hidden_dim=cfg.MODEL.CROSS_MODAL_RECON_HIDDEN_DIM,
+                target_seed=cfg.SOLVER.SEED,
             )
         if self.use_agf:
             self.AGF = AGF(dim=self.BACKBONE.token_dim,

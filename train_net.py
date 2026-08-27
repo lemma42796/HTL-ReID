@@ -14,13 +14,15 @@ from config import cfg
 
 
 def set_seed(seed):
+    os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(True)
 
 
 if __name__ == '__main__':
@@ -42,6 +44,10 @@ if __name__ == '__main__':
     cfg.merge_from_list(args.opts)
     # cfg.freeze()
 
+    # Set CUDA process controls before the first CUDA API call. PYTHONHASHSEED
+    # is set by the runner before this interpreter starts.
+    os.environ['CUDA_VISIBLE_DEVICES'] = cfg.MODEL.DEVICE_ID
+    os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
     set_seed(cfg.SOLVER.SEED)
 
     if cfg.MODEL.DIST_TRAIN:
@@ -63,8 +69,6 @@ if __name__ == '__main__':
 
     if cfg.MODEL.DIST_TRAIN:
         torch.distributed.init_process_group(backend='nccl', init_method='env://')
-
-    os.environ['CUDA_VISIBLE_DEVICES'] = cfg.MODEL.DEVICE_ID
 
     train_loader, train_loader_normal, val_loader, num_query, num_classes, camera_num, view_num = make_dataloader(
         cfg)

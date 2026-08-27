@@ -1,4 +1,6 @@
 import logging
+import hashlib
+import json
 import os
 import time
 import torch.nn as nn
@@ -73,6 +75,30 @@ def _compute_train_loss(cfg, output, loss_fn, target, target_cam, epoch):
     return loss
 
 
+def _unwrap_model(model):
+    return model.module if hasattr(model, 'module') else model
+
+
+def _reconstruction_history(model):
+    recon = getattr(_unwrap_model(model), 'CROSS_MODAL_RECON', None)
+    if recon is None or not hasattr(recon, 'target_history'):
+        return ()
+    return recon.target_history()
+
+
+def _sequence_digest(values):
+    payload = ','.join(str(value) for value in values).encode('ascii')
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _write_determinism_trace(path, trace):
+    temp_path = path + '.tmp'
+    with open(temp_path, 'w', encoding='utf-8') as handle:
+        json.dump(trace, handle, indent=2, ensure_ascii=False)
+        handle.write('\n')
+    os.replace(temp_path, path)
+
+
 def do_train(cfg,
              model,
              center_criterion,
@@ -108,6 +134,20 @@ def do_train(cfg,
             print('Using {} GPUs for training'.format(torch.cuda.device_count()))
             model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],
                                                               find_unused_parameters=True)
+    trace_path = os.path.join(cfg.OUTPUT_DIR, 'determinism_trace.json')
+    determinism_trace = {
+        'seed': int(cfg.SOLVER.SEED),
+        'runtime': {
+            'deterministic_algorithms': torch.are_deterministic_algorithms_enabled(),
+            'cudnn_deterministic': bool(torch.backends.cudnn.deterministic),
+            'cudnn_benchmark': bool(torch.backends.cudnn.benchmark),
+            'cublas_workspace_config': os.environ.get(
+                'CUBLAS_WORKSPACE_CONFIG', ''),
+            'pythonhashseed': os.environ.get('PYTHONHASHSEED', ''),
+        },
+        'epochs': [],
+    }
+    _write_determinism_trace(trace_path, determinism_trace)
     evaluator_m = _make_evaluator(cfg, num_query)
     evaluator_m.reset()
 
@@ -120,6 +160,7 @@ def do_train(cfg,
 
     best_index = {'mAP': 0, "Rank-1": 0, 'Rank-5': 0, 'Rank-10': 0}
     for epoch in range(1, run_epochs + 1):
+        target_history_start = len(_reconstruction_history(model))
         start_time = time.time()
         loss_meter.reset()
         evaluator_m.reset()
@@ -186,6 +227,7 @@ def do_train(cfg,
                            os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + '_{}.pth'.format(epoch)))
 
         should_eval = (eval_period > 0 and epoch % eval_period == 0) or epoch == run_epochs
+        eval_metrics = None
         if should_eval:
             if cfg.MODEL.DIST_TRAIN:
                 if dist.get_rank() == 0:
@@ -209,6 +251,12 @@ def do_train(cfg,
                     # 计算多模态性能
                     cmc, mAP, _, _, _, _, _ = evaluator_m.compute(cfg)
                     _log_eval_results(logger, cmc, mAP, epoch=epoch)
+                    eval_metrics = {
+                        'mAP': float(mAP.item()),
+                        'Rank1': float(cmc[0].item()),
+                        'Rank5': float(cmc[4].item()),
+                        'Rank10': float(cmc[9].item()),
+                    }
                     writer.add_scalar('MM/mAP', mAP.item(), epoch)
                     writer.add_scalar('MM/Rank-1', cmc[0].item(), epoch)
 
@@ -245,6 +293,12 @@ def do_train(cfg,
                 # 计算多模态性能
                 cmc, mAP, _, _, _, _, _ = evaluator_m.compute(cfg)
                 _log_eval_results(logger, cmc, mAP, epoch=epoch)
+                eval_metrics = {
+                    'mAP': float(mAP.item()),
+                    'Rank1': float(cmc[0].item()),
+                    'Rank5': float(cmc[4].item()),
+                    'Rank10': float(cmc[9].item()),
+                }
                 writer.add_scalar('MM/mAP', mAP.item(), epoch)
                 writer.add_scalar('MM/Rank-1', cmc[0].item(), epoch)
 
@@ -262,7 +316,32 @@ def do_train(cfg,
                 logger.info("Best Multi-Modal Rank-10: {:.2%}".format(best_index['Rank-10']))
                 print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
 
-
+        epoch_loss, epoch_acc = torch.stack([
+            loss_meter.avg.float(), acc_meter.avg.float()
+        ]).cpu().tolist()
+        target_sequence = list(
+            _reconstruction_history(model)[target_history_start:])
+        sampler = getattr(train_loader, 'sampler', None)
+        trace_entry = {
+            'epoch': epoch,
+            'sampler_epoch': getattr(sampler, 'last_epoch', None),
+            'sampler_order_sha256': getattr(
+                sampler, 'last_order_digest', None),
+            'sampler_order_length': getattr(
+                sampler, 'last_order_length', None),
+            'reconstruction_targets': target_sequence,
+            'reconstruction_targets_sha256': _sequence_digest(
+                target_sequence),
+            'train_loss': float(epoch_loss),
+            'train_accuracy': float(epoch_acc),
+            'evaluation': eval_metrics,
+        }
+        determinism_trace['epochs'].append(trace_entry)
+        _write_determinism_trace(trace_path, determinism_trace)
+        logger.info(
+            'Determinism Trace - Epoch %d: sampler=%s recon=%s',
+            epoch, trace_entry['sampler_order_sha256'],
+            trace_entry['reconstruction_targets_sha256'])
 
     writer.close()
     return None

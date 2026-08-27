@@ -1,6 +1,7 @@
 from torch.utils.data.sampler import Sampler
 from collections import defaultdict
 import copy
+import hashlib
 import random
 import numpy as np
 
@@ -14,10 +15,15 @@ class RandomIdentitySampler(Sampler):
     - batch_size (int): number of examples in a batch.
     """
 
-    def __init__(self, data_source, batch_size, num_instances):
+    def __init__(self, data_source, batch_size, num_instances, seed=0):
         self.data_source = data_source
         self.batch_size = batch_size
         self.num_instances = num_instances
+        self.seed = int(seed)
+        self.epoch = 0
+        self.last_epoch = None
+        self.last_order_digest = None
+        self.last_order_length = 0
         self.num_pids_per_batch = self.batch_size // self.num_instances
         self.index_dic = defaultdict(list) #dict with list value
         #{783: [0, 5, 116, 876, 1554, 2041],...,}
@@ -35,13 +41,19 @@ class RandomIdentitySampler(Sampler):
             self.length += num - num % self.num_instances
 
     def __iter__(self):
+        epoch = self.epoch
+        py_rng = random.Random(self.seed + epoch)
+        np_rng = np.random.RandomState(self.seed + epoch)
         batch_idxs_dict = defaultdict(list)
 
         for pid in self.pids:
             idxs = copy.deepcopy(self.index_dic[pid])
             if len(idxs) < self.num_instances:
-                idxs = np.random.choice(idxs, size=self.num_instances, replace=True)
-            random.shuffle(idxs)
+                idxs = np_rng.choice(
+                    idxs, size=self.num_instances, replace=True).tolist()
+            else:
+                idxs = list(idxs)
+            py_rng.shuffle(idxs)
             batch_idxs = []
             for idx in idxs:
                 batch_idxs.append(idx)
@@ -53,13 +65,19 @@ class RandomIdentitySampler(Sampler):
         final_idxs = []
 
         while len(avai_pids) >= self.num_pids_per_batch:
-            selected_pids = random.sample(avai_pids, self.num_pids_per_batch)
+            selected_pids = py_rng.sample(
+                avai_pids, self.num_pids_per_batch)
             for pid in selected_pids:
                 batch_idxs = batch_idxs_dict[pid].pop(0)
                 final_idxs.extend(batch_idxs)
                 if len(batch_idxs_dict[pid]) == 0:
                     avai_pids.remove(pid)
 
+        order_bytes = ','.join(str(index) for index in final_idxs).encode('ascii')
+        self.last_epoch = epoch + 1
+        self.last_order_digest = hashlib.sha256(order_bytes).hexdigest()
+        self.last_order_length = len(final_idxs)
+        self.epoch += 1
         return iter(final_idxs)
 
     def __len__(self):

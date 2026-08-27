@@ -5,6 +5,7 @@ import argparse
 import csv
 import datetime as dt
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -157,19 +158,24 @@ def run_row(args, timeout_bin, commit, experiment, row, row_config,
         "SOLVER.EVAL_PERIOD", str(EVAL_PERIOD),
         "SOLVER.SEED", str(args.seed),
     ]
+    run_env = os.environ.copy()
+    run_env["PYTHONHASHSEED"] = str(args.seed)
+    run_env["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+    env_prefix = "PYTHONHASHSEED={} CUBLAS_WORKSPACE_CONFIG=:4096:8 ".format(
+        args.seed)
     output_dir.joinpath("command.txt").write_text(
-        " ".join(command) + "\n", encoding="utf-8")
+        env_prefix + " ".join(command) + "\n", encoding="utf-8")
     output_dir.joinpath("RUNNING").write_text(
         dt.datetime.now().astimezone().isoformat() + "\n", encoding="utf-8")
 
     log_path = output_dir / "stdout.log"
     started = time.monotonic()
     with log_path.open("w", encoding="utf-8") as log_handle:
-        log_handle.write(" ".join(command) + "\n\n")
+        log_handle.write(env_prefix + " ".join(command) + "\n\n")
         log_handle.flush()
         completed = subprocess.run(
             command, cwd=args.repo_root, stdout=log_handle,
-            stderr=subprocess.STDOUT, check=False)
+            stderr=subprocess.STDOUT, check=False, env=run_env)
     elapsed = round(time.monotonic() - started, 1)
     output_dir.joinpath("RUNNING").unlink(missing_ok=True)
     status = "completed" if completed.returncode == 0 else (

@@ -241,10 +241,21 @@ def val_collate_fn(batch):
     return imgs, pids, camids, camids_batch, viewids, img_paths
 
 
-def _loader_options(num_workers, persistent=False):
+def _seed_worker(worker_id):
+    del worker_id
+    worker_seed = torch.initial_seed() % (2 ** 32)
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+
+def _loader_options(num_workers, seed, persistent=False):
+    generator = torch.Generator()
+    generator.manual_seed(int(seed))
     options = {
         'num_workers': num_workers,
         'pin_memory': True,
+        'generator': generator,
+        'worker_init_fn': _seed_worker,
     }
     if num_workers > 0:
         options.update(
@@ -277,8 +288,11 @@ def make_dataloader(cfg):
     ])
 
     num_workers = cfg.DATALOADER.NUM_WORKERS
-    train_loader_options = _loader_options(num_workers, persistent=True)
-    eval_loader_options = _loader_options(num_workers)
+    seed = int(cfg.SOLVER.SEED)
+    train_loader_options = _loader_options(
+        num_workers, seed=seed, persistent=True)
+    val_loader_options = _loader_options(num_workers, seed=seed + 1)
+    normal_loader_options = _loader_options(num_workers, seed=seed + 2)
     dataset = __factory[cfg.DATASETS.NAMES](root=cfg.DATASETS.ROOT_DIR)
     train_set = ImageDataset(dataset.train, train_transforms)
     train_set_normal = ImageDataset(dataset.train, val_transforms)
@@ -302,7 +316,9 @@ def make_dataloader(cfg):
         else:
             train_loader = DataLoader(
                 train_set, batch_size=cfg.SOLVER.IMS_PER_BATCH,
-                sampler=RandomIdentitySampler(dataset.train, cfg.SOLVER.IMS_PER_BATCH, cfg.DATALOADER.NUM_INSTANCE),
+                sampler=RandomIdentitySampler(
+                    dataset.train, cfg.SOLVER.IMS_PER_BATCH,
+                    cfg.DATALOADER.NUM_INSTANCE, seed=seed),
                 collate_fn=train_collate_fn,
                 **train_loader_options,
             )
@@ -320,11 +336,11 @@ def make_dataloader(cfg):
     val_loader = DataLoader(
         val_set, batch_size=cfg.TEST.IMS_PER_BATCH, shuffle=False,
         collate_fn=val_collate_fn,
-        **eval_loader_options,
+        **val_loader_options,
     )
     train_loader_normal = DataLoader(
         train_set_normal, batch_size=cfg.TEST.IMS_PER_BATCH, shuffle=False,
         collate_fn=val_collate_fn,
-        **eval_loader_options,
+        **normal_loader_options,
     )
     return train_loader, train_loader_normal, val_loader, len(dataset.query), num_classes, cam_num, view_num
