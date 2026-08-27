@@ -4,12 +4,12 @@
 
 ## 一、信息入口
 
-- 最后更新：2026-08-27 18:25 CST
+- 最后更新：2026-08-27 23:00 CST
 - 项目根目录：`/Users/a123/Documents/reid`
 - 代码目录：`/Users/a123/Documents/reid/HTL-ReID`
 - 远端代码目录：`/root/autodl-tmp/HTL-ReID`
 - 远端登录：正式命令仍使用`autodl-reid`别名
-- SSH别名：本机保存的`autodl-reid`与`autodl-reid-new`仍指向上一台机器，连接第三台前必须更新或通过临时SSH配置把`autodl-reid`解析到用户提供的新入口；不得误连旧端点
+- SSH别名：本机保存的`autodl-reid`与`autodl-reid-new`仍指向上一台机器，已验证无法连通；第三台机器入口为用户提供的`ssh -p 10112 root@connect.westb.seetacloud.com`，连接前必须把`autodl-reid`更新或通过临时SSH配置解析到该入口；不得误连旧端点
 - 数据集根目录：`/root/autodl-tmp/datasets`
 - 输出根目录：`/root/autodl-tmp/outputs/HTL-ReID`
 - 执行边界：所有测试和可执行检查一律在远端训练机完成；本地仅用于读取/编辑文件和Git操作。模型相关测试必须使用远端CUDA，不得回退到CPU。
@@ -116,6 +116,7 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 - T8路由均衡能力已实现并保持默认关闭：`FACR_ROUTE_BALANCE_WEIGHT=0.0`不改变现有配置和checkpoint。E019以0.05正式训练后主指标退化，且路由诊断未发现明显塌缩，因此仅保留该能力用于诊断/消融，不进入最终模型。
 - T9/T10能力已实现且默认关闭：SFTS可输出每模态一个丢弃patch残差摘要，FACR可选最终自模态细化。T9全tokens自细化和T10残差摘要路径均已否定为最终精度方案，仅保留代码用于复现消融。
 - T12能力已实现且默认关闭：单个共享重建器每批随机选一个目标模态，目标tokens stop-gradient，仅其他两模态及重建头接受该辅助损失梯度；评估不调用重建头。
+- 新增`SOLVER.STRICT_DETERMINISM`开关（默认1）：为0时`train_net.py`不启用`use_deterministic_algorithms`并恢复cuDNN benchmark，其余固定种子采样机制不变；旧配置行为不变。归因链脚本为`tools/run_rgbnt201_determinism_chain.py`。
 - RGBNT201 paper候选配置当前使用256×128、Adam、50 epoch、10-epoch warm-up和完整cosine；E031/T12的batch 64配置与结果保留为阶段性参考。在模型定稿前不锁定未来消融的batch或运行M0/K1；最终消融必须在结构和协议冻结后统一batch、seed、epoch、优化器、输入尺寸与评估设置。ImageNet ViT backbone LR当前为2.8e-4，新模块LR为3.5e-4，weight decay为1e-4。ViT-B/16对应128个patch，固定K配置的`SFTS_RATIO`已同步按`K/128`换算；只保留水平翻转、padding/crop和random erasing，关闭灰度块替换与modality dropout。车辆数据配置未在本次迁移中改动。
 
 ## 五、有效实验结果
@@ -156,6 +157,8 @@ E001–E030均为RGBNT201、batch 40、20 epoch、主结果关闭re-ranking；E0
 
 ## 六、当前运行状态
 
+- 方案C确定性代价归因链已启动：`tools/run_rgbnt201_determinism_chain.py`依次运行E039（归因）、E040/E041（决策后双 seed），每步经runner强制30分钟超时。E039保留固定采样器/加载器/重建目标种子，仅将新增的`SOLVER.STRICT_DETERMINISM`置0恢复修复前cuDNN/cuBLAS数值行为；决策规则为E039 mAP ≥ 64.05时后续用宽松模式，否则保持严格模式。链级汇总将写入`/root/autodl-tmp/outputs/HTL-ReID/E039-E041_chain.json`。
+- E038/T12-B64-DET25已正常完成：训练commit `46395b1`，returncode 0，耗时500.1秒；最佳epoch 20，62.05 mAP、65.79 Rank-1、77.63 Rank-5、82.06 Rank-10；确定性trace 25个epoch全部正常，无OOM、NaN或timeout。关键发现：同配置、同seed的修复前E036为66.49/68.06，确定化后主指标下降4.44/2.27，且逐epoch验证曲线波动加剧（45–62区间）。说明旧结果（含E031/E036）不能直接作为确定性口径下的性能参考；E038为确定性口径下首个可比基线。待决策：是否接受严格确定性的性能代价，还是恢复cuDNN benchmark等非严格设置换取性能（需用户决策）。
 - E037/DET-A/B已正常完成，严格确定性修复通过：训练commit `46395b1`；两次相同seed 1111、batch 64、2 epoch CUDA测试均returncode 0，耗时113.7/114.7秒，指标均为52.25 mAP、54.07 Rank-1、67.70 Rank-5、78.83 Rank-10。两个`determinism_trace.json`字节完全一致，SHA256均为`5bcc8c06dbaa32a40232e970f38eceb5cc66a507dab930161877d893790d3138`，采样顺序、完整重建目标、loss、accuracy和逐epoch指标均一致。全部测试在远端完成，无确定性算法报错、OOM或NaN；短测试不作为论文性能结果。
 - E036/T12-B64-REC25已正常完成：训练commit `33b006b`，returncode 0，耗时462.5秒；最佳epoch 24，66.49 mAP、68.06 Rank-1、83.85 Rank-5、88.88 Rank-10，未复现E031。E031/E036解析配置除输出目录与train50→25外完全一致，scheduler horizon均为50，训练代码无差异，但epoch 1曲线已经分叉；因此提前停止不是退化原因，当前同seed训练存在未受控非确定性。E031保留为最高单次结果，但在复现问题解决前不能视为稳定性能。
 - E035/T12-B128-LR2已正常完成：训练commit `1180596`，returncode 0，耗时447.0秒；最佳epoch 19，68.23 mAP、73.68 Rank-1、83.61 Rank-5、87.68 Rank-10。相对E034提高6.92/11.00/8.37/4.07个百分点，证明LR线性翻倍显著修复batch 128退化；相对E031仍低3.31 mAP和1.56 Rank-1，但墙钟缩短50.1%。epoch 25已从最佳点回落，因此无需恢复50 epoch；若继续优化，优先在5e-4至7e-4之间筛LR，或保持物理batch 128并恢复batch 64的Triplet难样本分组。
@@ -198,9 +201,9 @@ E001–E030均为RGBNT201、batch 40、20 epoch、主结果关闭re-ranking；E0
 
 ## 七、下一步
 
-1. 继续完善和筛选模型；E031仅作为当前阶段性最好结果，不围绕尚未定稿的结构补跑消融；
-2. E037的两次2-epoch远端CUDA运行trace字节一致，严格确定性修复已验证通过；保留该机制和逐epoch证据，不再使用旧的非确定性结果判断batch/LR优劣；
-3. 下一项正式运行先用batch 64、train25/max50建立严格确定性基线；确认结果后，才继续比较batch 64/128或筛5e-4至7e-4学习率；
+1. 方案C链运行中：E039归因 + 决策后E040/E041；链完成前不启动其他性能对比运行；
+2. 链完成后按结果回填E039–E041文档并确定后续口径：若宽松模式胜出，后续筛选与消融改用宽松数值+固定采样口径（逐次运行间不再逐位一致，但采样轨迹可复现）；若严格模式胜出，以E038为基线继续；
+3. 口径确定后，才继续比较batch 64/128或筛5e-4至7e-4学习率；
 4. 模型结构定稿后，冻结输入尺寸、batch、seed、epoch、优化器、学习率、数据增强和评估口径；若batch 128已验证通过，最终模型及内部消融也统一使用batch 128；
 5. 在完全一致的冻结协议下训练最终模型，再补齐K1和M0消融；若最终结构改变，同步重新定义与之配对的消融链；
 6. 消融完成后再做最终模型、K1和M0推理路径的参数量、GFLOPs、延迟和显存对比；K1 mask未物理压缩FACR输入，不声称等比例效率收益；

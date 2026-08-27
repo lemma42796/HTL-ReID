@@ -13,16 +13,22 @@ import argparse
 from config import cfg
 
 
-def set_seed(seed):
-    os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
+def set_seed(seed, strict=True):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     random.seed(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    torch.use_deterministic_algorithms(True)
+    if strict:
+        os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        torch.use_deterministic_algorithms(True)
+    else:
+        # Relaxed numeric path: keep pre-determinism-fix cuDNN behavior while
+        # the seeded sampler/loader/reconstruction generators stay active.
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = True
 
 
 if __name__ == '__main__':
@@ -48,7 +54,8 @@ if __name__ == '__main__':
     # is set by the runner before this interpreter starts.
     os.environ['CUDA_VISIBLE_DEVICES'] = cfg.MODEL.DEVICE_ID
     os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
-    set_seed(cfg.SOLVER.SEED)
+    strict_determinism = int(cfg.SOLVER.STRICT_DETERMINISM) != 0
+    set_seed(cfg.SOLVER.SEED, strict=strict_determinism)
 
     if cfg.MODEL.DIST_TRAIN:
         torch.cuda.set_device(args.local_rank)

@@ -282,6 +282,10 @@ _C.SOLVER.SCHEDULER_UNIT = "iteration"
 _C.SOLVER.COSINE_MARGIN = 0.5
 _C.SOLVER.COSINE_SCALE = 30
 _C.SOLVER.SEED = 1111
+# Strict bitwise determinism: deterministic cuBLAS/cuDNN algorithms and
+# torch.use_deterministic_algorithms. Seeded sampler/loader/reconstruction
+# generators stay active regardless of this flag.
+_C.SOLVER.STRICT_DETERMINISM = 1
 _C.MODEL.NO_MARGIN = True
 # epoch number of saving periodic model weights
 _C.SOLVER.CHECKPOINT_PERIOD = 60
