@@ -1,0 +1,22 @@
+# E034｜RGBNT201 T12 batch 128正常学习率重试
+
+- 状态：待启动
+- 登记时间：2026-08-27 17:20 CST
+- 对应论文实验：T12-B128-R1
+- 实验目的：完成E033未实际进入训练的batch 128单变量筛选，在batch 128下恢复或超过E031阶段性最高性能，并验证32 GB RTX 5090稳定性与墙钟时间。
+- 单变量关系：相对E031仅将batch从64改为128；T12结构、输入、seed、epoch、优化器、学习率、warm-up、数据增强与评估协议均一致。E032的低backbone LR factor 0.2不再使用。
+- 配置：`configs/RGBNT201/paper/base.yml` + `configs/RGBNT201/fusion/t12_sfts_k1_shared_token_recon.yml`
+- 数据集与协议：RGBNT201 `train_171`训练、`test`评估；三模态联合评估；每epoch验证；关闭re-ranking。
+- Seed / batch / epoch：1111 / 128 / 50。
+- 输入与采样：256×128；ViT-B/16，共128个patch；每身份实例数8。
+- Optimizer / LR / weight decay：Adam / 3.5e-4 / 1e-4；ImageNet ViT backbone LR factor 0.8，实际LR 2.8e-4；新模块LR 3.5e-4。
+- Scheduler / warm-up：50 epoch cosine；前10 epoch从0.1倍LR线性warm-up；按epoch步进。
+- 模型设置：共享ViT-B/16；固定K=1 SFTS共享mask；三轮FACR；训练期共享跨模态token重建，hidden dim 256、损失系数0.1、前5 epoch auxiliary warm-up。
+- 预训练权重：`/root/autodl-tmp/pretrained/vit_base_patch16_224_augreg2_in21k_ft_in1k.pth`
+- 计划命令：`/root/miniconda3/bin/python tools/run_rgbnt201_fusion.py --single-experiment E034 --single-row T12-B128-R1 --single-config configs/RGBNT201/fusion/t12_sfts_k1_shared_token_recon.yml --single-output-name E034_T12_batch128_bb08_seed1111 --seed 1111`；runner内部强制`timeout --signal=TERM --kill-after=10s 30m`。
+- 输出目录：`/root/autodl-tmp/outputs/HTL-ReID/E034_T12_batch128_bb08_seed1111`
+- Runner日志：`/root/autodl-tmp/outputs/HTL-ReID/E034_T12_batch128_bb08_seed1111.runner.log`；该日志位于目标输出目录之外，避免提前创建目标目录触发防覆盖检查。
+- 预期产物：`resolved_config.yml`、`commit.txt`、`command.txt`、`stdout.log`、`train_log.txt`、`run_result.json`、`DONE`、TensorBoard事件和`HTL-ReID_best.pth`。
+- 墙钟上限：30分钟。
+- 判断口径：完整50 epoch无OOM、NaN、Traceback、超时或显存不稳定；最佳结果至少达到E031的71.54 mAP / 75.24 Rank-1才同时通过稳定性与精度门槛。
+- 是否进入论文：模型尚未定稿，本次仅为batch 128单变量筛选，不触发M0/K1消融。
