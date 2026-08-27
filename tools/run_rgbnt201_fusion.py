@@ -37,7 +37,7 @@ DEFAULT_SEED = 1111
 BATCH_SIZE = 128
 EVAL_PERIOD = 1
 INPUT_SIZE = (256, 128)
-SUPPORTED_BACKBONE_LR_FACTORS = (0.1, 0.2, 0.8)
+SUPPORTED_BACKBONE_LR_FACTORS = (0.1, 0.2, 0.8, 1.0)
 
 EPOCH_PATTERN = re.compile(r"Validation Results - Epoch:\s+(\d+)")
 MAP_PATTERN = re.compile(r"mAP:\s+([0-9.]+)%")
@@ -49,6 +49,8 @@ RANK_PATTERNS = {
 
 
 def resolve_config(row_config, output_dir, seed=DEFAULT_SEED,
+                   base_config=BASE_CONFIG, input_size=INPUT_SIZE,
+                   dataset="RGBNT201",
                    expected_train_epochs=TRAIN_EPOCHS,
                    expected_base_lr=3.5e-4,
                    expected_batch_size=BATCH_SIZE,
@@ -58,7 +60,7 @@ def resolve_config(row_config, output_dir, seed=DEFAULT_SEED,
                    expected_resume_path='',
                    expected_strict_determinism=None):
     cfg = default_cfg.clone()
-    cfg.merge_from_file(BASE_CONFIG)
+    cfg.merge_from_file(base_config)
     cfg.merge_from_file(row_config)
     cfg.OUTPUT_DIR = str(output_dir)
     cfg.SOLVER.EVAL_PERIOD = EVAL_PERIOD
@@ -78,10 +80,18 @@ def resolve_config(row_config, output_dir, seed=DEFAULT_SEED,
         raise ValueError(
             "expected batch size {}, got {}".format(
                 expected_batch_size, cfg.SOLVER.IMS_PER_BATCH))
-    if tuple(cfg.INPUT.SIZE_TRAIN) != INPUT_SIZE:
-        raise ValueError("all RGBNT201 fusion rows must train at 256x128")
-    if tuple(cfg.INPUT.SIZE_TEST) != INPUT_SIZE:
-        raise ValueError("all RGBNT201 fusion rows must test at 256x128")
+    if tuple(cfg.INPUT.SIZE_TRAIN) != tuple(input_size):
+        raise ValueError(
+            "expected train input size {}, got {}".format(
+                tuple(input_size), tuple(cfg.INPUT.SIZE_TRAIN)))
+    if tuple(cfg.INPUT.SIZE_TEST) != tuple(input_size):
+        raise ValueError(
+            "expected test input size {}, got {}".format(
+                tuple(input_size), tuple(cfg.INPUT.SIZE_TEST)))
+    dataset_name = str(cfg.DATASETS.NAMES).strip("()[]'\"")
+    if dataset_name != str(dataset):
+        raise ValueError(
+            "expected dataset {}, got {}".format(dataset, cfg.DATASETS.NAMES))
     if cfg.SOLVER.OPTIMIZER_NAME != "Adam":
         raise ValueError("all RGBNT201 paper rows must use Adam")
     if abs(float(cfg.SOLVER.BASE_LR) - float(expected_base_lr)) > 1e-12:
@@ -173,6 +183,8 @@ def run_row(args, timeout_bin, commit, experiment, row, row_config,
     output_dir.mkdir(parents=True)
     cfg = resolve_config(
         row_config, output_dir, seed=args.seed,
+        base_config=args.base_config, input_size=args.input_size,
+        dataset=args.dataset,
         expected_train_epochs=args.expected_train_epochs,
         expected_base_lr=args.expected_base_lr,
         expected_batch_size=args.expected_batch_size,
@@ -186,7 +198,7 @@ def run_row(args, timeout_bin, commit, experiment, row, row_config,
     command = [
         timeout_bin, "--signal=TERM", "--kill-after=10s", TIME_LIMIT,
         args.python, "train_net.py",
-        "--config_file", BASE_CONFIG,
+        "--config_file", args.base_config,
         "--config_file", row_config,
         "OUTPUT_DIR", str(output_dir),
         "SOLVER.EVAL_PERIOD", str(EVAL_PERIOD),
@@ -236,6 +248,11 @@ def run_row(args, timeout_bin, commit, experiment, row, row_config,
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--python", default="/root/miniconda3/bin/python")
+    parser.add_argument("--base-config", default=BASE_CONFIG)
+    parser.add_argument("--dataset", default="RGBNT201")
+    parser.add_argument(
+        "--input-size", type=int, nargs=2, default=INPUT_SIZE,
+        metavar=("HEIGHT", "WIDTH"))
     parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     parser.add_argument(
         "--output-root", type=Path,
@@ -294,6 +311,8 @@ def main():
         output_dir = args.output_root / output_names[row]
         resolved_cfg = resolve_config(
             row_config, output_dir, seed=args.seed,
+            base_config=args.base_config, input_size=args.input_size,
+            dataset=args.dataset,
             expected_train_epochs=args.expected_train_epochs,
             expected_base_lr=args.expected_base_lr,
             expected_batch_size=args.expected_batch_size,
@@ -305,13 +324,13 @@ def main():
         plan.append({
             "experiment": experiment,
             "row": row,
-            "base_config": BASE_CONFIG,
+            "base_config": args.base_config,
             "row_config": row_config,
             "output_dir": str(output_dir),
-            "dataset": "RGBNT201",
+            "dataset": args.dataset,
             "seed": args.seed,
             "batch_size": int(resolved_cfg.SOLVER.IMS_PER_BATCH),
-            "input_size": list(INPUT_SIZE),
+            "input_size": list(args.input_size),
             "epochs": int(resolved_cfg.SOLVER.TRAIN_EPOCHS),
             "scheduler_horizon_epochs": int(
                 resolved_cfg.SOLVER.MAX_EPOCHS),
