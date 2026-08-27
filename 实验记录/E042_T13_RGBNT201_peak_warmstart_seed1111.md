@@ -1,7 +1,8 @@
 # E042｜T13 E031 warm start 单次峰值探索
 
-- 状态：运行准备中
+- 状态：已完成，未达到目标
 - 登记时间：2026-08-28
+- 开始时间：2026-08-28 00:36 CST
 - 对应论文实验：T13-PEAK
 - 实验目的：在用户明确以单次峰值为目标的前提下，从E031历史最佳checkpoint初始化，通过联合增强损失与推理描述符，尝试达到或超过DeMo*在RGBNT201上的73.7% mAP、80.5% Rank-1数值线。
 - 初始化：`/root/autodl-tmp/outputs/HTL-ReID/E031_T12_sfts_k1_shared_token_recon_256x128_seed1111/HTL-ReID_best.pth`；只加载模型权重，optimizer、scheduler和新增Part Branch重新初始化。
@@ -15,3 +16,9 @@
 - 输出目录：`/root/autodl-tmp/outputs/HTL-ReID/E042_T12_peak_warmstart_seed1111`。
 - 预期产物：`resolved_config.yml`、`commit.txt`、`command.txt`、`stdout.log`、`train_log.txt`、`run_result.json`、`DONE`、TensorBoard事件、mAP最佳checkpoint、Rank-1最佳checkpoint；若同一epoch同时达到73.7/80.5，另存目标checkpoint。
 - 判断口径：只要任一epoch同一模型同时达到或超过73.7% mAP与80.5% Rank-1，即判定本次单次冲线成功；否则记录最高mAP及其Rank-1，并保留最高Rank-1 checkpoint。
+- 启动信息：runner PID 1800，GNU timeout PID 1803，训练主进程PID 1804；训练代码commit `b55bedd`。
+- 启动检查：RTX 5090 32 GB；正式进程显存约16016 MiB；E031加载264/270个当前模型state-dict键，只有新增Part Branch的BN和分类头随机初始化；epoch 1以约0.275秒/batch完成训练并进入验证，loss有限、训练准确率约0.999，无OOM、NaN、Traceback或配置错误。
+- 完成结果：正常完成15 epoch，返回码0，墙钟340.1秒；最佳mAP出现在epoch 7，为72.03%，对应Rank-1 76.56%、Rank-5 84.57%、Rank-10 87.68%。
+- 目标差距：相对DeMo*的73.7% mAP、80.5% Rank-1，分别低1.67和3.94个百分点；本次单次冲线失败。
+- 最佳产物：`HTL-ReID_best.pth`与`HTL-ReID_best_rank1.pth`均已生成；未生成目标checkpoint。结构化结果见输出目录中的`run_result.json`与`DONE`。
+- 结论：联合加入三目标重建、跨模态Triplet、BCC、Part Branch及联合描述符后，单次性能高于E031的mAP 0.49个百分点、Rank-1 1.32个百分点，但仍未达到DeMo*；epoch 7后指标持续回落，继续延长当前训练日程没有依据。

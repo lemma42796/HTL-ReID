@@ -1,7 +1,8 @@
 # E043｜T14 七路解耦MoE warm start单次冲线
 
-- 状态：运行准备中
+- 状态：已完成，mAP超过目标但Rank-1未同时达到
 - 登记时间：2026-08-28
+- 开始时间：2026-08-28 01:01 CST
 - 对应论文实验：T14-DEMO-LITE
 - 实验目的：从E042最佳mAP checkpoint热启动，用DeMo式异构特征分解与动态专家融合替代继续堆叠辅助损失，尝试单次达到DeMo*在RGBNT201上的73.7% mAP、80.5% Rank-1数值线。
 - 初始化：`/root/autodl-tmp/outputs/HTL-ReID/E042_T12_peak_warmstart_seed1111/HTL-ReID_best.pth`；只加载模型权重，optimizer和scheduler重新初始化；新增七路MoE随机初始化。
@@ -15,3 +16,11 @@
 - 输出目录：`/root/autodl-tmp/outputs/HTL-ReID/E043_T14_demo_lite_moe_seed1111`。
 - 预期产物：`resolved_config.yml`、`commit.txt`、`command.txt`、`stdout.log`、`train_log.txt`、`run_result.json`、`DONE`、TensorBoard事件、最佳mAP checkpoint、最佳Rank-1 checkpoint；若同一epoch达到目标则另存目标checkpoint。
 - 判断口径：任一epoch同一模型同时达到或超过73.7% mAP与80.5% Rank-1即为本次单次冲线成功。
+- 启动信息：代码commit `3f12c70`；runner PID 3983，GNU timeout PID 3985，训练主进程PID 3986。
+- 启动检查：RTX 5090 32 GB；E042 checkpoint载入255/345个当前模型state-dict键，跳过已关闭的重建模块，新增七路MoE及其BN/分类头按计划随机初始化；CUDA batch 4前向、标准损失、反向与16896维推理描述符通过，峰值显存1870.8 MiB。正式batch 64进程显存约16252 MiB，epoch 1前10/54 iteration的loss为6.591、训练准确率1.000，无OOM、NaN、Traceback或配置错误。
+- 完成结果：正常完成50 epoch，返回码0，墙钟970.4秒；无OOM、NaN、Traceback或超时。
+- 最佳mAP：epoch 33取得74.46% mAP、79.67% Rank-1、87.32% Rank-5、90.19% Rank-10；mAP超过DeMo* 0.76个百分点，Rank-1低0.83个百分点。
+- 最佳Rank-1：epoch 31取得74.33% mAP、80.02% Rank-1；mAP超过DeMo* 0.63个百分点，Rank-1仅低0.48个百分点。这是全部50 epoch中距离双指标目标最近的checkpoint。
+- 目标判断：没有同一epoch同时达到73.7% mAP与80.5% Rank-1，因此未生成`HTL-ReID_target.pth`，本次按预注册口径仍未完全持平DeMo*。
+- 最佳产物：`HTL-ReID_best.pth`保存epoch 33的最佳mAP模型，`HTL-ReID_best_rank1.pth`保存epoch 31的最佳Rank-1模型；结构化结果见`run_result.json`与`DONE`。
+- 结论：七路解耦MoE相对E042将最佳mAP提高2.43个百分点、Rank-1提高3.46个百分点，证明结构融合是有效方向；当前只剩Rank-1 0.48个百分点缺口，后续应围绕epoch 31 checkpoint做描述符权重或Rank-1导向微调，不再扩展训练长度或叠加辅助损失。

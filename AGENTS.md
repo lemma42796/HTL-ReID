@@ -1,56 +1,52 @@
 # HTL-ReID Agent Instructions
 
-## Execution boundary
+## 职责与维护约束
 
-- Formal training runs, long-running dependency installations, dataset downloads, and large file transfers may be started when the user explicitly requests them.
-- All tests and executable checks must run on the remote training machine, including syntax checks, configuration parsing, dependency checks, smoke tests, training, validation, evaluation, inference, profiling, and controlled comparisons. Do not run any test or executable check in the local workspace. Local work is limited to reading/editing files and Git operations.
-- All model-executing tests must use a CUDA GPU on the remote machine. Do not silently fall back to CPU; fail clearly when CUDA is unavailable. Remote CPU is permitted only for static checks that do not execute the model.
-- Every training process has a hard wall-clock limit of 30 minutes, including the currently active run. Launch future training with `timeout --signal=TERM --kill-after=10s 30m ...`; never start an uncapped training process.
-- Controlled comparisons must use the same fixed epoch count that fits within the 30-minute cap. Do not let different models train for different epoch counts merely because their throughput differs.
-- Do not continuously watch or frequently poll long-running work. Prefer a detached/background process with output redirected to a log, perform at most one short startup check, then report the command, PID or job identifier, and log/artifact path and return control to the user. Monitor again only when the user explicitly asks for a status update.
-- Read-only diagnostics and short smoke tests are allowed only on the remote machine when they do not create large artifacts.
-- Before proposing a formal run, state the config files, dataset, seed, batch size, epoch count, re-ranking setting, output directory, and expected artifacts.
-- Never put credentials, passwords, access tokens, or private keys in commands saved to the repository, logs, or documentation.
+本文件只规定代理在本项目中长期必须遵守的工作规则、权限边界和稳定路径约定。
 
-## Remote storage budget
+- 只保留跨会话持续有效、会约束后续执行的规则；规则变化时直接替换旧内容。
+- 不记录项目状态、当前模型、性能、TODO、实验结论、commit、连接结果、排障过程或会话流水。
+- 临时服务器端点和易变化的运行环境信息写入`项目状态与TODO.md`，不写入本文件。
+- 能由其他项目文档承载的内容只规定其归属，不在此重复正文。
+- 新增条款前先确认它是长期规则而非一次性任务；相同主题必须合并，避免重复和膨胀。
 
-- Treat the remote system disk as limited to 30 GB and `/root/autodl-tmp` as limited to 50 GB.
-- Store the repository, datasets, pretrained weights, checkpoints, outputs, and other persistent experiment artifacts under `/root/autodl-tmp`.
-- Do not create duplicate datasets, extracted archive copies, extra environments, redundant checkpoints, or unneeded caches.
-- Prefer `pip install --no-cache-dir ...` when giving installation commands.
-- Before any large write, first inspect free space with `df -h` and inspect relevant directory sizes with `du -sh`.
-- Keep only artifacts required for reproducibility: the resolved config, log, metrics/result file, and the best or explicitly required checkpoint. Periodic checkpoints remain disabled unless the user requests them.
-- Do not delete checkpoints, datasets, logs, or other material artifacts without explicit user approval. Identify cleanup candidates and their sizes first.
+## 执行边界
 
-## Verified remote baseline
+- 本地只允许读取/编辑文件和Git操作。语法检查、配置解析、依赖检查、测试、训练、验证、评估、推理、性能分析及其他可执行检查一律在远端训练机进行。
+- 所有执行模型的检查必须使用远端CUDA GPU；CUDA不可用时明确失败，不得回退CPU。远端CPU只可用于不执行模型的静态检查。
+- 正式训练、长时间依赖安装、数据下载和大文件传输，只有用户明确要求时才可启动。
+- 每个训练进程必须使用`timeout --signal=TERM --kill-after=10s 30m ...`，墙钟时间不得超过30分钟。
+- 长任务应后台运行并重定向日志，只做一次简短启动检查；除非用户要求，不持续监控或频繁轮询。
+- 提出正式运行前，先说明配置、数据集、seed、batch size、epoch、re-ranking设置、输出目录和预期产物。
+- 不得把密码、密钥、令牌或其他凭据写入仓库、命令记录、日志或文档。
 
-- Expected GPU: NVIDIA GeForce RTX 5090 with 32 GB VRAM.
-- Expected runtime: Python 3.12, PyTorch 2.8.0 with CUDA 12.8, and torchvision 0.23.0.
-- Remote repository path: `/root/autodl-tmp/HTL-ReID`.
-- Remote SSH alias: `autodl-reid`. Use the alias instead of embedding the current endpoint in commands.
-- Dataset root: `/root/autodl-tmp/datasets`.
-- Pretrained-weight path: `/root/autodl-tmp/pretrained/vit_base_patch16_224_augreg2_in21k_ft_in1k.pth`.
-- Output root: `/root/autodl-tmp/outputs/HTL-ReID`.
-- In non-interactive SSH commands, use `/root/miniconda3/bin/python` if `python` is not on `PATH`.
+## 远端路径与存储
 
-## Remote network policy
+- 每次训练可能使用不同训练机，不得默认沿用上次会话或上次实验的SSH端点；本次任务尚未明确提供可用SSH地址时，必须先向用户索取，再进行任何远端操作。
+- 正式命令使用SSH别名`autodl-reid`，不得在仓库中保存临时端点。非交互命令找不到`python`时使用`/root/miniconda3/bin/python`。
+- 仓库、数据集、预训练权重和输出分别使用`/root/autodl-tmp/HTL-ReID`、`/root/autodl-tmp/datasets`、`/root/autodl-tmp/pretrained`和`/root/autodl-tmp/outputs/HTL-ReID`。
+- 按系统盘30 GB、`/root/autodl-tmp` 50 GB的上限管理空间；不得创建重复数据集、冗余环境、周期性checkpoint或无必要缓存。
+- 大量写入前先执行`df -h`和相关目录的`du -sh`。安装依赖优先使用`pip install --no-cache-dir ...`。
+- 只保留复现所需的resolved config、日志、指标文件和最佳或明确要求的checkpoint。删除任何数据、checkpoint、日志或其他重要产物前，必须先列出候选及大小并取得用户明确同意。
 
-- GitHub direct access from AutoDL is intermittent. For all remote Git operations that access GitHub, enable AutoDL academic acceleration by default only inside a temporary subshell, for example: `( source /etc/network_turbo && git pull --ff-only )`.
-- Do not first attempt direct GitHub access from AutoDL unless diagnosing the accelerator itself. Do not rewrite Git remotes to a `ghproxy` URL, set a persistent global Git proxy, or source `/etc/network_turbo` from shell startup files.
-- Let the temporary subshell end immediately after the GitHub Git command so proxy variables cannot affect pip, dataset access, model or dataset downloads, or unrelated network traffic. Do not use academic acceleration for those other operations unless the user explicitly requests it for a specific command.
-- This temporary-subshell policy was verified on 2026-08-26 with accelerated `git ls-remote` returning commit `bc4e0bb` and accelerated `git pull --ff-only` updating the training machine to `32bbc7b`.
+## 远端网络
 
-## Experiment discipline
+- AutoDL访问GitHub的远端Git操作默认只在临时子shell中启用学术加速，例如`( source /etc/network_turbo && git pull --ff-only )`。
+- 不先尝试直连GitHub，不改写remote为代理地址，不设置持久全局代理，也不在shell启动文件中加载`/etc/network_turbo`。
+- 加速子shell须在Git命令结束后立即退出；不得把其代理变量用于pip、数据集、模型下载或其他网络访问，除非用户针对具体命令明确要求。
 
-- Follow the current paper plan and freeze the paper configs before formal training.
-- Use the same backbone, pretrained weights, input size, sampler, batch size, optimizer, schedule, seed policy, and evaluation protocol for controlled M0-M3 comparisons.
-- Main-paper evaluation must explicitly disable re-ranking; report re-ranking only as a separately labeled result.
-- Register every formal or failed run in `实验记录.md`, and store its complete command, commit, config, seed, paths, metrics, and conclusion in a dedicated `实验记录/E*.md` file.
+## 实验纪律
 
-## Documentation discipline
+- 受控比较必须使用相同的backbone、预训练权重、输入尺寸、采样器、batch size、优化器、训练日程、seed策略、epoch数和评估协议；不得因吞吐差异使用不同epoch数。
+- 主论文结果明确关闭re-ranking；如需报告re-ranking，必须作为单独标注的补充结果。
+- 每个正式、失败或中止运行都必须分配唯一E编号，在`实验记录.md`登记，并在`实验记录/E*.md`保存目的、唯一改动、完整命令、commit、配置、seed、路径、指标和结论。
+- 不删除失败实验记录，不用单次高点替代预先约定的多seed或受控比较结论。
 
-- Do not record session-by-session actions, troubleshooting narratives, transfer progress, or other operational流水账 in project documents.
-- Keep `AGENTS.md` limited to stable rules, constraints, and path conventions.
-- Keep `项目状态与TODO.md` limited to the latest valid state, unresolved issues, and current tasks; replace stale information instead of appending history.
-- Keep `论文大修执行方案.md` limited to durable research and revision decisions.
-- Use `实验记录.md` only as the durable experiment index and result summary. Use `实验记录/E*.md` only for reproducible formal or failed experiment evidence that must be retained long term.
+## 文档分工
+
+- `AGENTS.md`：只保存本文件所定义的长期代理规则。
+- `项目状态与TODO.md`：每次覆盖旧内容，只保存最新状态、已开始但未完成的任务、尚未开始的待完成新任务。
+- `实验记录.md`：只保存实验编号索引和必要的跨实验汇总；每个实验只登记一次。
+- `实验记录/E*.md`：保存可复现的单次正式、失败或中止实验完整证据。
+- `论文大修执行方案.md`：仅在模型和协议冻结后保存持久的研究及论文修订决策。
+- 项目文档不得记录会话操作、传输进度、重复实验详情或排障流水。
