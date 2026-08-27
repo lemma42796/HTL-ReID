@@ -1,6 +1,6 @@
 # E036｜RGBNT201 T12 batch 64提前停止恢复验证
 
-- 状态：运行中
+- 状态：已完成，未恢复E031
 - 登记时间：2026-08-27 17:56 CST
 - 开始时间：2026-08-27 17:58 CST
 - 对应论文实验：T12-B64-REC25
@@ -24,3 +24,9 @@
 - 是否进入论文：模型尚未定稿，本次只确认batch 64提前停止协议，不触发M0/K1消融。
 - 启动信息：runner PID 12047，GNU timeout PID 12049，训练主进程PID 12050；其余同命令进程为14个DataLoader worker。
 - 启动检查：RTX 5090上CUDA训练已进入并完成epoch 1训练，batch 64对应每epoch 54 iterations；日志确认`training 25/50 scheduler epochs`，首轮warm-up日志LR为5.95e-5，与E031一致。训练速度约269.5 samples/s，启动阶段主进程显存约5,290 MiB，无OOM、NaN或配置错误，30分钟硬超时已生效。按运行纪律不继续轮询。
+- 完成结果：returncode 0，墙钟462.5秒（约7分43秒），完整25 epoch正常完成，无残留训练进程；输出目录432 MB，最佳checkpoint约432 MB，`DONE`、结果JSON、配置快照和日志均已保留。
+- 最佳结果：epoch 24，mAP 66.49%、Rank-1 68.06%、Rank-5 83.85%、Rank-10 88.88%。epoch 25为65.29%/68.18%/83.25%/87.56%。
+- 与E031比较：mAP -5.05、Rank-1 -7.18、Rank-5持平、Rank-10 +2.16个百分点；墙钟由895.4秒降至462.5秒，缩短432.9秒（48.3%）。未复现71.54 mAP / 75.24 Rank-1。
+- 与E035比较：mAP -1.74、Rank-1 -5.62、Rank-5 +0.24、Rank-10 +1.20个百分点；墙钟增加15.5秒。当前单次结果下，恢复batch 64并不优于batch 128 + LR翻倍。
+- 复现核查：E031与E036的`resolved_config.yml`除输出目录和`TRAIN_EPOCHS: 50→25`外完全一致，`MAX_EPOCHS=50`，且训练代码无差异；但epoch 1 mAP已分别为37.33和41.06，曲线从第一轮即分叉，因此退化不是epoch 25提前停止造成。当前seed设置未形成严格确定性：`train_net.py`同时设置`cudnn.deterministic=True`与`cudnn.benchmark=True`，未调用`torch.use_deterministic_algorithms`，T12每batch还通过全局Torch RNG随机选择重建目标模态。
+- 结论：E031是当前最高单次结果，但未被同seed同协议重跑复现；不能再把batch大小视为唯一原因。下一步应先修复CUDA、DataLoader和重建目标采样的确定性并保存采样/顺序证据，再用batch 64 train25复验；在此之前不继续追逐batch或LR单次高点。
