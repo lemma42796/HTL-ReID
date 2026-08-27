@@ -836,6 +836,23 @@ class HTLReID(nn.Module):
             descriptors.append(part_feat)
         return torch.cat(descriptors, dim=-1)
 
+    def _test_descriptor_components(self, cls4t, rgb_feat, nir_feat,
+                                    tir_feat, quality_scores=None,
+                                    masks=None, decoupled_moe_feat=None):
+        """Return raw descriptor blocks for one-pass evaluation sweeps."""
+        components = {
+            'facr': cls4t,
+            'original': torch.cat([
+                rgb_feat[:, 0, :], nir_feat[:, 0, :], tir_feat[:, 0, :]
+            ], dim=-1),
+        }
+        if self.use_part:
+            components['part'] = self._part_feature(
+                rgb_feat, nir_feat, tir_feat, quality_scores, masks)
+        if decoupled_moe_feat is not None:
+            components['moe'] = decoupled_moe_feat
+        return components
+
     def _hetero_triplet_loss(self, cls_list, labels, has_tir=True):
         """Supervised batch-hard triplet across different modality features."""
         reference = cls_list[0]
@@ -976,8 +993,9 @@ class HTLReID(nn.Module):
         if missing_keys:
             print('  Missing keys (randomly initialized): {}'.format(missing_keys))
 
-    def forward(self, x, cam_label=None, label=None, view_label=None, img_path=None, mode=1,
-                writer=None, epoch=None):
+    def forward(self, x, cam_label=None, label=None, view_label=None,
+                img_path=None, mode=1, writer=None, epoch=None,
+                return_descriptor_components=False):
         if self.training:
             RGB = x['RGB']
             NIR = x['NI']
@@ -1123,6 +1141,11 @@ class HTLReID(nn.Module):
             if self.use_decoupled_moe:
                 decoupled_moe_feat = self.DECOUPLED_MOE(
                     RGB_feat, NIR_feat, TIR_feat)
+            if return_descriptor_components:
+                return self._test_descriptor_components(
+                    cls4t, RGB_feat_s, NIR_feat_s, TIR_feat_s,
+                    quality_scores, masks=mask,
+                    decoupled_moe_feat=decoupled_moe_feat)
             return self._test_descriptor(cls4t, RGB_feat_s, NIR_feat_s, TIR_feat_s,
                                          quality_scores, masks=mask,
                                          decoupled_moe_feat=decoupled_moe_feat)
