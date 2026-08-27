@@ -65,3 +65,11 @@ htmlcov/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# ---------- Local project documentation ----------
+/AGENTS.md
+/项目状态与TODO.md
+/实验记录.md
+/实验记录/
+/论文大修执行方案.md
+/本地资料索引.md
