@@ -155,6 +155,7 @@ E001–E030均为RGBNT201、batch 40、20 epoch、主结果关闭re-ranking；E0
 
 ## 六、当前运行状态
 
+- E036/T12-B64-REC25已登记、待启动：恢复E031的batch 64、base LR 3.5e-4、backbone LR 2.8e-4与50-epoch cosine horizon，仅在epoch 25提前停止。目标是用约7–8分钟复现E031在epoch 17取得的71.54 mAP / 75.24 Rank-1，并验证batch 64可以同时保住精度与缩短时间。
 - E035/T12-B128-LR2已正常完成：训练commit `1180596`，returncode 0，耗时447.0秒；最佳epoch 19，68.23 mAP、73.68 Rank-1、83.61 Rank-5、87.68 Rank-10。相对E034提高6.92/11.00/8.37/4.07个百分点，证明LR线性翻倍显著修复batch 128退化；相对E031仍低3.31 mAP和1.56 Rank-1，但墙钟缩短50.1%。epoch 25已从最佳点回落，因此无需恢复50 epoch；若继续优化，优先在5e-4至7e-4之间筛LR，或保持物理batch 128并恢复batch 64的Triplet难样本分组。
 - E034/T12-B128-R1已正常完成：训练commit `131d163`，returncode 0，耗时793.0秒；最佳epoch 4，61.31 mAP、62.68 Rank-1、75.24 Rank-5、83.61 Rank-10。相对E031只将batch 64改为128，墙钟缩短102.4秒（11.4%），但mAP/Rank-1下降10.23/12.56个百分点，未通过精度门槛；相对batch 96的E032仅快0.6秒。batch 128能够完成训练，但不能在E031原学习率与50-epoch日程下直接固定使用。
 - E033/T12-B128因启动脚本提前创建目标目录而触发runner防覆盖检查，模型未执行、GPU无训练占用、无checkpoint或指标；空目录与失败runner日志保留，实际训练转E034。

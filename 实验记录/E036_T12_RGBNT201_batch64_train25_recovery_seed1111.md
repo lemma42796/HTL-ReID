@@ -1,0 +1,22 @@
+# E036｜RGBNT201 T12 batch 64提前停止恢复验证
+
+- 状态：待启动
+- 登记时间：2026-08-27 17:56 CST
+- 对应论文实验：T12-B64-REC25
+- 实验目的：恢复E031的batch 64与原始学习率，只删除最佳点之后的训练，验证能否在约一半时间内复现71.54 mAP / 75.24 Rank-1阶段性最高性能。
+- 单变量关系：相对E031仅将实际训练停止点从50改为25 epoch；`MAX_EPOCHS=50`，因此前25 epoch的cosine与warm-up轨迹、模型、batch、优化器、学习率、seed、输入、数据增强和评估协议均与E031一致。
+- 配置：`configs/RGBNT201/paper/base.yml` + `configs/RGBNT201/fusion/t12_sfts_k1_shared_token_recon_b64_25e.yml`
+- 数据集与协议：RGBNT201 `train_171`训练、`test`评估；三模态联合评估；每epoch验证；关闭re-ranking。
+- Seed / batch / train epochs：1111 / 64 / 25；`MAX_EPOCHS=50`，cosine horizon不变。
+- 输入与采样：256×128；ViT-B/16，共128个patch；每身份实例数8；每epoch 54 iterations。
+- Optimizer / LR / weight decay：Adam / 3.5e-4 / 1e-4；ImageNet ViT backbone LR factor 0.8，实际LR 2.8e-4；新模块LR 3.5e-4。
+- Scheduler / warm-up：50-epoch cosine horizon；前10 epoch从0.1倍LR线性warm-up；按epoch步进；epoch 25提前停止。
+- 模型设置：共享ViT-B/16；固定K=1 SFTS共享mask；三轮FACR；训练期共享跨模态token重建，hidden dim 256、损失系数0.1、前5 epoch auxiliary warm-up。
+- 预训练权重：`/root/autodl-tmp/pretrained/vit_base_patch16_224_augreg2_in21k_ft_in1k.pth`
+- 计划命令：`/root/miniconda3/bin/python tools/run_rgbnt201_fusion.py --single-experiment E036 --single-row T12-B64-REC25 --single-config configs/RGBNT201/fusion/t12_sfts_k1_shared_token_recon_b64_25e.yml --single-output-name E036_T12_batch64_train25_recovery_seed1111 --seed 1111 --expected-train-epochs 25 --expected-base-lr 0.00035 --expected-batch-size 64`；runner内部强制`timeout --signal=TERM --kill-after=10s 30m`。
+- 输出目录：`/root/autodl-tmp/outputs/HTL-ReID/E036_T12_batch64_train25_recovery_seed1111`
+- Runner日志：`/root/autodl-tmp/outputs/HTL-ReID/E036_T12_batch64_train25_recovery_seed1111.runner.log`，位于目标输出目录之外。
+- 预期产物：`resolved_config.yml`、`commit.txt`、`command.txt`、`stdout.log`、`train_log.txt`、`run_result.json`、`DONE`、TensorBoard事件和`HTL-ReID_best.pth`。
+- 墙钟上限：30分钟；预计约7–8分钟，但以实际结果为准。
+- 判断口径：完整25 epoch无OOM、NaN、Traceback、超时或显存不稳定；最佳结果达到或在确定性误差范围内复现E031的71.54 mAP / 75.24 Rank-1，且显著高于E035的68.23 / 73.68，才认为恢复成功。
+- 是否进入论文：模型尚未定稿，本次只确认batch 64提前停止协议，不触发M0/K1消融。

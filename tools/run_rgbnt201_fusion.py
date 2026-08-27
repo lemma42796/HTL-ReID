@@ -49,7 +49,8 @@ RANK_PATTERNS = {
 
 def resolve_config(row_config, output_dir, seed=DEFAULT_SEED,
                    expected_train_epochs=TRAIN_EPOCHS,
-                   expected_base_lr=3.5e-4):
+                   expected_base_lr=3.5e-4,
+                   expected_batch_size=BATCH_SIZE):
     cfg = default_cfg.clone()
     cfg.merge_from_file(BASE_CONFIG)
     cfg.merge_from_file(row_config)
@@ -62,8 +63,10 @@ def resolve_config(row_config, output_dir, seed=DEFAULT_SEED,
                 expected_train_epochs, cfg.SOLVER.TRAIN_EPOCHS))
     if int(cfg.SOLVER.SEED) != int(seed):
         raise ValueError("fusion row seed override was not applied")
-    if int(cfg.SOLVER.IMS_PER_BATCH) != BATCH_SIZE:
-        raise ValueError("all RGBNT201 paper rows must use batch size 128")
+    if int(cfg.SOLVER.IMS_PER_BATCH) != int(expected_batch_size):
+        raise ValueError(
+            "expected batch size {}, got {}".format(
+                expected_batch_size, cfg.SOLVER.IMS_PER_BATCH))
     if tuple(cfg.INPUT.SIZE_TRAIN) != INPUT_SIZE:
         raise ValueError("all RGBNT201 fusion rows must train at 256x128")
     if tuple(cfg.INPUT.SIZE_TEST) != INPUT_SIZE:
@@ -141,7 +144,8 @@ def run_row(args, timeout_bin, commit, experiment, row, row_config,
     cfg = resolve_config(
         row_config, output_dir, seed=args.seed,
         expected_train_epochs=args.expected_train_epochs,
-        expected_base_lr=args.expected_base_lr)
+        expected_base_lr=args.expected_base_lr,
+        expected_batch_size=args.expected_batch_size)
     output_dir.joinpath("resolved_config.yml").write_text(cfg.dump(), encoding="utf-8")
     output_dir.joinpath("commit.txt").write_text(commit + "\n", encoding="utf-8")
     command = [
@@ -206,6 +210,8 @@ def main():
         "--expected-train-epochs", type=int, default=TRAIN_EPOCHS)
     parser.add_argument(
         "--expected-base-lr", type=float, default=3.5e-4)
+    parser.add_argument(
+        "--expected-batch-size", type=int, default=BATCH_SIZE)
     args = parser.parse_args()
     args.repo_root = args.repo_root.resolve()
     args.output_root = args.output_root.resolve()
@@ -215,6 +221,8 @@ def main():
         parser.error("--expected-train-epochs must be positive")
     if args.expected_base_lr <= 0:
         parser.error("--expected-base-lr must be positive")
+    if args.expected_batch_size <= 0:
+        parser.error("--expected-batch-size must be positive")
 
     single_values = (
         args.single_experiment, args.single_row,
@@ -234,7 +242,8 @@ def main():
         resolved_cfg = resolve_config(
             row_config, output_dir, seed=args.seed,
             expected_train_epochs=args.expected_train_epochs,
-            expected_base_lr=args.expected_base_lr)
+            expected_base_lr=args.expected_base_lr,
+            expected_batch_size=args.expected_batch_size)
         plan.append({
             "experiment": experiment,
             "row": row,
@@ -243,7 +252,7 @@ def main():
             "output_dir": str(output_dir),
             "dataset": "RGBNT201",
             "seed": args.seed,
-            "batch_size": BATCH_SIZE,
+            "batch_size": int(resolved_cfg.SOLVER.IMS_PER_BATCH),
             "input_size": list(INPUT_SIZE),
             "epochs": int(resolved_cfg.SOLVER.TRAIN_EPOCHS),
             "scheduler_horizon_epochs": int(
