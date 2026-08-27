@@ -1,0 +1,22 @@
+# E035｜RGBNT201 T12 batch 128线性学习率缩放
+
+- 状态：待启动
+- 登记时间：2026-08-27 17:43 CST
+- 对应论文实验：T12-B128-LR2
+- 实验目的：在保持batch 128时间优势的前提下，用线性学习率缩放补偿每epoch优化器更新次数由54降至27，并检验能否恢复E031阶段性最高性能。
+- 变化与限制：相对E034将base/new-module LR从3.5e-4提高到7e-4，backbone LR从2.8e-4提高到5.6e-4，并将实际训练长度从50缩短到25 epoch；cosine horizon仍为50 epoch。因同时改变学习率与停止点，本次是快速优化筛选，不作单变量因果归因，也不与最终消融混用。
+- 配置：`configs/RGBNT201/paper/base.yml` + `configs/RGBNT201/fusion/t12_sfts_k1_shared_token_recon_b128_lr2x_25e.yml`
+- 数据集与协议：RGBNT201 `train_171`训练、`test`评估；三模态联合评估；每epoch验证；关闭re-ranking。
+- Seed / batch / train epochs：1111 / 128 / 25；`MAX_EPOCHS=50`，因此cosine调度仍采用50-epoch horizon。
+- 输入与采样：256×128；ViT-B/16，共128个patch；每身份实例数8；每epoch 27 iterations。
+- Optimizer / LR / weight decay：Adam / 7e-4 / 1e-4；ImageNet ViT backbone LR factor 0.8，实际LR 5.6e-4；新模块LR 7e-4。
+- Scheduler / warm-up：50-epoch cosine horizon；前10 epoch从0.1倍LR线性warm-up；按epoch步进；epoch 25提前停止。
+- 模型设置：共享ViT-B/16；固定K=1 SFTS共享mask；三轮FACR；训练期共享跨模态token重建，hidden dim 256、损失系数0.1、前5 epoch auxiliary warm-up。
+- 预训练权重：`/root/autodl-tmp/pretrained/vit_base_patch16_224_augreg2_in21k_ft_in1k.pth`
+- 计划命令：`/root/miniconda3/bin/python tools/run_rgbnt201_fusion.py --single-experiment E035 --single-row T12-B128-LR2 --single-config configs/RGBNT201/fusion/t12_sfts_k1_shared_token_recon_b128_lr2x_25e.yml --single-output-name E035_T12_batch128_lr2x_train25_seed1111 --seed 1111 --expected-train-epochs 25 --expected-base-lr 0.0007`；runner内部强制`timeout --signal=TERM --kill-after=10s 30m`。
+- 输出目录：`/root/autodl-tmp/outputs/HTL-ReID/E035_T12_batch128_lr2x_train25_seed1111`
+- Runner日志：`/root/autodl-tmp/outputs/HTL-ReID/E035_T12_batch128_lr2x_train25_seed1111.runner.log`，位于目标输出目录之外。
+- 预期产物：`resolved_config.yml`、`commit.txt`、`command.txt`、`stdout.log`、`train_log.txt`、`run_result.json`、`DONE`、TensorBoard事件和`HTL-ReID_best.pth`。
+- 墙钟上限：30分钟；预计约6–8分钟，但以实际结果为准。
+- 判断口径：完整25 epoch无OOM、NaN、Traceback、超时或显存不稳定；最佳结果至少达到E031的71.54 mAP / 75.24 Rank-1才通过精度门槛。
+- 是否进入论文：模型尚未定稿，本次仅为优化筛选，不触发M0/K1消融。

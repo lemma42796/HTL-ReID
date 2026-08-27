@@ -155,6 +155,7 @@ E001–E030均为RGBNT201、batch 40、20 epoch、主结果关闭re-ranking；E0
 
 ## 六、当前运行状态
 
+- E035/T12-B128-LR2已登记、待启动：batch 128下将base/new-module LR线性放大到7e-4、backbone LR放大到5.6e-4；实际训练25 epoch但保留50-epoch cosine horizon和10-epoch warm-up。目标是在约6–8分钟筛选中至少达到71.54 mAP / 75.24 Rank-1；因同时改变LR与停止点，不作为单变量消融。
 - E034/T12-B128-R1已正常完成：训练commit `131d163`，returncode 0，耗时793.0秒；最佳epoch 4，61.31 mAP、62.68 Rank-1、75.24 Rank-5、83.61 Rank-10。相对E031只将batch 64改为128，墙钟缩短102.4秒（11.4%），但mAP/Rank-1下降10.23/12.56个百分点，未通过精度门槛；相对batch 96的E032仅快0.6秒。batch 128能够完成训练，但不能在E031原学习率与50-epoch日程下直接固定使用。
 - E033/T12-B128因启动脚本提前创建目标目录而触发runner防覆盖检查，模型未执行、GPU无训练占用、无checkpoint或指标；空目录与失败runner日志保留，实际训练转E034。
 - E032/T12-OPT1已正常完成：训练commit `cd693d1`，returncode 0，耗时793.6秒；最佳epoch 6，67.98 mAP、69.62 Rank-1、80.50 Rank-5、86.48 Rank-10。batch 96运行中显存快照为21,504/32,607 MiB，全程无OOM、NaN、超时或残留进程；结果、日志、配置快照、DONE和最佳checkpoint已保留。相对E031下降3.56 mAP和5.62 Rank-1，而耗时仅缩短101.8秒；由于batch和backbone LR同时变化，不作单因素归因，但不保留factor 0.2的低backbone LR组合。

@@ -47,15 +47,19 @@ RANK_PATTERNS = {
 }
 
 
-def resolve_config(row_config, output_dir, seed=DEFAULT_SEED):
+def resolve_config(row_config, output_dir, seed=DEFAULT_SEED,
+                   expected_train_epochs=TRAIN_EPOCHS,
+                   expected_base_lr=3.5e-4):
     cfg = default_cfg.clone()
     cfg.merge_from_file(BASE_CONFIG)
     cfg.merge_from_file(row_config)
     cfg.OUTPUT_DIR = str(output_dir)
     cfg.SOLVER.EVAL_PERIOD = EVAL_PERIOD
     cfg.SOLVER.SEED = int(seed)
-    if int(cfg.SOLVER.TRAIN_EPOCHS) != TRAIN_EPOCHS:
-        raise ValueError("all RGBNT201 paper rows must train for exactly 50 epochs")
+    if int(cfg.SOLVER.TRAIN_EPOCHS) != int(expected_train_epochs):
+        raise ValueError(
+            "expected {} training epochs, got {}".format(
+                expected_train_epochs, cfg.SOLVER.TRAIN_EPOCHS))
     if int(cfg.SOLVER.SEED) != int(seed):
         raise ValueError("fusion row seed override was not applied")
     if int(cfg.SOLVER.IMS_PER_BATCH) != BATCH_SIZE:
@@ -66,8 +70,10 @@ def resolve_config(row_config, output_dir, seed=DEFAULT_SEED):
         raise ValueError("all RGBNT201 fusion rows must test at 256x128")
     if cfg.SOLVER.OPTIMIZER_NAME != "Adam":
         raise ValueError("all RGBNT201 paper rows must use Adam")
-    if abs(float(cfg.SOLVER.BASE_LR) - 3.5e-4) > 1e-12:
-        raise ValueError("all RGBNT201 paper rows must use base LR 3.5e-4")
+    if abs(float(cfg.SOLVER.BASE_LR) - float(expected_base_lr)) > 1e-12:
+        raise ValueError(
+            "expected base LR {}, got {}".format(
+                expected_base_lr, cfg.SOLVER.BASE_LR))
     backbone_lr_factor = float(cfg.SOLVER.BACKBONE_LR_FACTOR)
     if not any(abs(backbone_lr_factor - value) <= 1e-12
                for value in SUPPORTED_BACKBONE_LR_FACTORS):
@@ -132,7 +138,10 @@ def run_row(args, timeout_bin, commit, experiment, row, row_config,
             output_name=None):
     output_dir = args.output_root / (output_name or OUTPUT_NAMES[row])
     output_dir.mkdir(parents=True)
-    cfg = resolve_config(row_config, output_dir, seed=args.seed)
+    cfg = resolve_config(
+        row_config, output_dir, seed=args.seed,
+        expected_train_epochs=args.expected_train_epochs,
+        expected_base_lr=args.expected_base_lr)
     output_dir.joinpath("resolved_config.yml").write_text(cfg.dump(), encoding="utf-8")
     output_dir.joinpath("commit.txt").write_text(commit + "\n", encoding="utf-8")
     command = [
@@ -193,11 +202,19 @@ def main():
     parser.add_argument("--single-config")
     parser.add_argument("--single-output-name")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument(
+        "--expected-train-epochs", type=int, default=TRAIN_EPOCHS)
+    parser.add_argument(
+        "--expected-base-lr", type=float, default=3.5e-4)
     args = parser.parse_args()
     args.repo_root = args.repo_root.resolve()
     args.output_root = args.output_root.resolve()
     if args.seed < 0:
         parser.error("--seed must be non-negative")
+    if args.expected_train_epochs <= 0:
+        parser.error("--expected-train-epochs must be positive")
+    if args.expected_base_lr <= 0:
+        parser.error("--expected-base-lr must be positive")
 
     single_values = (
         args.single_experiment, args.single_row,
@@ -214,7 +231,10 @@ def main():
     plan = []
     for experiment, row, row_config in rows:
         output_dir = args.output_root / output_names[row]
-        resolved_cfg = resolve_config(row_config, output_dir, seed=args.seed)
+        resolved_cfg = resolve_config(
+            row_config, output_dir, seed=args.seed,
+            expected_train_epochs=args.expected_train_epochs,
+            expected_base_lr=args.expected_base_lr)
         plan.append({
             "experiment": experiment,
             "row": row,
@@ -225,7 +245,9 @@ def main():
             "seed": args.seed,
             "batch_size": BATCH_SIZE,
             "input_size": list(INPUT_SIZE),
-            "epochs": TRAIN_EPOCHS,
+            "epochs": int(resolved_cfg.SOLVER.TRAIN_EPOCHS),
+            "scheduler_horizon_epochs": int(
+                resolved_cfg.SOLVER.MAX_EPOCHS),
             "optimizer": resolved_cfg.SOLVER.OPTIMIZER_NAME,
             "base_lr": float(resolved_cfg.SOLVER.BASE_LR),
             "backbone_lr_factor": float(
