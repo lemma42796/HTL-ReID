@@ -33,7 +33,7 @@ OUTPUT_NAMES = {
 TIME_LIMIT = "30m"
 TRAIN_EPOCHS = 50
 DEFAULT_SEED = 1111
-BATCH_SIZE = 64
+BATCH_SIZE = 96
 EVAL_PERIOD = 1
 INPUT_SIZE = (256, 128)
 
@@ -58,7 +58,7 @@ def resolve_config(row_config, output_dir, seed=DEFAULT_SEED):
     if int(cfg.SOLVER.SEED) != int(seed):
         raise ValueError("fusion row seed override was not applied")
     if int(cfg.SOLVER.IMS_PER_BATCH) != BATCH_SIZE:
-        raise ValueError("all RGBNT201 paper rows must use batch size 64")
+        raise ValueError("all RGBNT201 paper rows must use batch size 96")
     if tuple(cfg.INPUT.SIZE_TRAIN) != INPUT_SIZE:
         raise ValueError("all RGBNT201 fusion rows must train at 256x128")
     if tuple(cfg.INPUT.SIZE_TEST) != INPUT_SIZE:

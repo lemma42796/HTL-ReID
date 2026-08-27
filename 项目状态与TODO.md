@@ -17,7 +17,7 @@
 
 ## 二、当前研究目标
 
-M0–M3、T1–T12、固定K参数敏感性及三seed T2/K1配对实验已经完成，但E001–E030均使用384×192与20-epoch诊断协议。T12在seed 1111/2222均同时超过配对K1，因此仍作为当前优先结构；自E031起RGBNT201统一迁移到256×128，并参照非CLIP共享ViT DeMo*采用Adam、batch 64、50 epoch、10-epoch warm-up。旧结果只作为结构筛选证据，论文主表必须补齐新协议下的同条件M0/K1/T12。
+M0–M3、T1–T12、固定K参数敏感性及三seed T2/K1配对实验已经完成，但E001–E030均使用384×192与20-epoch诊断协议。T12在seed 1111/2222均同时超过配对K1，因此仍作为当前优先结构；E031完成RGBNT201向256×128、Adam、50 epoch和10-epoch warm-up的迁移首跑，使用batch 64并直接保留，不追加batch 96重跑。为利用RTX 5090剩余显存并缩短时间，后续尚未运行的M0/K1改用batch 96；结果记录和论文表格必须显式标注该batch差异，不将其表述为严格同batch受控比较。旧结果只作为结构筛选证据。
 
 当前融合实验：
 
@@ -103,7 +103,7 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 - T8路由均衡能力已实现并保持默认关闭：`FACR_ROUTE_BALANCE_WEIGHT=0.0`不改变现有配置和checkpoint。E019以0.05正式训练后主指标退化，且路由诊断未发现明显塌缩，因此仅保留该能力用于诊断/消融，不进入最终模型。
 - T9/T10能力已实现且默认关闭：SFTS可输出每模态一个丢弃patch残差摘要，FACR可选最终自模态细化。T9全tokens自细化和T10残差摘要路径均已否定为最终精度方案，仅保留代码用于复现消融。
 - T12能力已实现且默认关闭：单个共享重建器每批随机选一个目标模态，目标tokens stop-gradient，仅其他两模态及重建头接受该辅助损失梯度；评估不调用重建头。
-- RGBNT201 paper配置自E031起统一为256×128、Adam、batch 64、50 epoch、10-epoch warm-up和完整cosine；ImageNet ViT backbone LR为2.8e-4，新模块LR为3.5e-4，weight decay为1e-4。ViT-B/16对应128个patch，固定K配置的`SFTS_RATIO`已同步按`K/128`换算；只保留水平翻转、padding/crop和random erasing，关闭灰度块替换与modality dropout。runner会拒绝偏离该协议的RGBNT201正式运行；车辆数据配置未在本次迁移中改动。
+- RGBNT201 paper配置使用256×128、Adam、50 epoch、10-epoch warm-up和完整cosine；E031/T12保留batch 64，后续尚未运行的M0/K1使用batch 96，不重跑T12。ImageNet ViT backbone LR保持2.8e-4，新模块LR保持3.5e-4，weight decay为1e-4，不随batch线性放大。ViT-B/16对应128个patch，固定K配置的`SFTS_RATIO`已同步按`K/128`换算；只保留水平翻转、padding/crop和random erasing，关闭灰度块替换与modality dropout。runner会拒绝未来运行偏离batch 96；车辆数据配置未在本次迁移中改动。
 
 ## 五、有效实验结果
 
