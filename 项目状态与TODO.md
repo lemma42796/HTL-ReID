@@ -13,6 +13,7 @@
 - 数据集根目录：`/root/autodl-tmp/datasets`
 - 输出根目录：`/root/autodl-tmp/outputs/HTL-ReID`
 - 实验索引：`/Users/a123/Documents/reid/HTL-ReID/实验记录.md`
+- 本地资料索引：`/Users/a123/Documents/reid/HTL-ReID/本地资料索引.md`；涵盖父目录中的论文集、旧稿源码/PDF/ZIP、审稿意见、数据归档、第三方官方源码和写作参考
 
 ## 二、当前研究目标
 
