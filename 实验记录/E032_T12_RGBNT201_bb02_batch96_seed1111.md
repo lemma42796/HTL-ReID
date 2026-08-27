@@ -23,4 +23,5 @@
 - 墙钟上限：30分钟。
 - 判断口径：首先检查batch 96是否在32 GB RTX 5090上无OOM/NaN并缩短耗时；精度与E031的71.54 mAP / 75.24 Rank-1作粗略筛选比较，但不声称单变量改进。
 - 启动检查：远端为RTX 5090 32 GB，无其他训练进程；数据集、预训练权重和目标路径正常。resolved config确认batch 96、Adam、50 epoch、backbone LR factor 0.2、re-ranking关闭；epoch 1以0.371秒/batch完成，GPU利用率99%，无OOM、NaN或配置错误。进程列表中其余同命令PID为14个DataLoader worker，不是重复训练。
+- 运行中显存快照：2026-08-27 16:57 CST，训练进程占用21,478 MiB，GPU总占用21,504/32,607 MiB，剩余10,608 MiB。基于该快照，下一次筛选将先尝试batch 128；若完整运行无OOM、NaN、超时或显存不稳定，后续RGBNT201筛选统一使用batch 128，否则回退batch 96。
 - 结果与结论：待运行。
