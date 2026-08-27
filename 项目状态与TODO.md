@@ -139,11 +139,11 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 | E029 / T12 | K1 + 训练期共享跨模态token重建 | 65.82 | 67.58 | 相对同seed K1 +2.51/+0.59；进入seed 2222配对验证 |
 | E030 / T12-S1 | T12额外seed 2222 | 66.94 | 68.90 | 相对同seed K1 +2.01/+1.08；不再追加RGBNT201 seed |
 
-所有表中结果均为RGBNT201、batch 40、20 epoch、主结果关闭re-ranking；E001–E021、E027及E029使用seed 1111，E022–E024、E028及E030使用seed 2222，E025–E026使用seed 3333。融合实验每个epoch验证，以便与已有最佳epoch选择协议一致。
+E001–E030均为RGBNT201、batch 40、20 epoch、主结果关闭re-ranking；E001–E021、E027及E029使用seed 1111，E022–E024、E028及E030使用seed 2222，E025–E026使用seed 3333。E031改为256×128、Adam、batch 64和50 epoch；后续M0/K1使用batch 96。融合实验每个epoch验证，以便与已有最佳epoch选择协议一致。
 
 ## 六、当前运行状态
 
-- E031/T12-R256正在第三台RTX 5090机器运行：训练代码commit `9082135`，runner PID 2908；256×128、Adam/batch 64/50 epoch/10-epoch warm-up、seed 1111、关闭re-ranking与30分钟硬超时均已在命令和日志中确认。epoch 1训练完成并进入验证，启动时无OOM、NaN或配置错误；输出目录为`/root/autodl-tmp/outputs/HTL-ReID/E031_T12_sfts_k1_shared_token_recon_256x128_seed1111`，runner日志为`/root/autodl-tmp/outputs/HTL-ReID/E031_T12_256x128.runner.log`。
+- E031/T12-R256已正常完成：训练代码commit `9082135`，returncode 0，耗时895.4秒；最佳epoch 17，71.54 mAP、75.24 Rank-1、83.85 Rank-5、86.72 Rank-10。50个epoch平均0.1996秒/batch，稳定训练快照显存15,600 MiB、GPU利用率92%–96%，无OOM、NaN、超时或残留进程；结果JSON、DONE、配置快照、日志、TensorBoard事件及约431 MB最佳checkpoint均已保留。E031直接作为batch 64的T12候选结果，不追加batch 96重跑。
 - E030/T12-S1已正常完成：commit `0daf4d2`，returncode 0，耗时758.0秒；最佳epoch 16，66.94 mAP、68.90 Rank-1、79.43 Rank-5、85.77 Rank-10。相对同seed E023/K1提升2.01/1.08/0.84/1.80，两个主指标均超过预设对照；结果JSON、DONE、日志、配置快照、TensorBoard事件和最佳checkpoint均已保留，训练进程已退出。基于时间成本，不再运行T12 seed 3333。
 - E029/T12已正常完成：commit `0daf4d2`，returncode 0，耗时757.7秒；最佳epoch 20，65.82 mAP、67.58 Rank-1、79.43 Rank-5、85.65 Rank-10。相对同seed E015/K1提升2.51/0.59/1.20/2.16，通过预设seed 2222晋级门槛；结果JSON、DONE、日志、配置快照、TensorBoard事件和最佳checkpoint均已保留，runner未生成预期的`retention.json`。
 - E028/T11-S1已正常完成：commit `a78c007`，returncode 0，耗时763.2秒；最佳epoch 17，64.76 mAP、67.46 Rank-1、81.46 Rank-5、86.36 Rank-10；实际保留11.6706%。较同seed E023/K1的mAP和Rank-1分别低0.17和0.36，未通过预设门槛，不运行seed 3333。
@@ -179,12 +179,12 @@ T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RG
 
 ## 七、下一步
 
-1. 完成E031的256×128论文协议首跑并记录精度、速度、显存和完整产物；
-2. E031若正常，按论文最小需要在相同协议补齐M0与K1；是否增加新协议下的额外seed在首轮结果后再决定，不自动运行；
+1. 使用已冻结的256×128、Adam、batch 96、50-epoch配置补齐M0与K1；不重跑batch 64的E031/T12；
+2. 不自动增加新协议额外seed，优先完成最小论文结果；M0/K1与E031/T12的batch差异必须在表格和正文中披露；
 3. T12保持当前结构与重建权重，不再改变T11或搜索辅助损失；
 4. RGBNT100和MSVR310按各自横纵比另行冻结配置，不能照搬RGBNT201尺寸；
 5. 完成M0与T12/K1推理路径的参数量、GFLOPs、延迟和显存对比；K1 mask未物理压缩FACR输入，不声称等比例效率收益；
-6. 论文主表只使用同分辨率、同训练协议结果，E001–E030必须明确标为历史结构筛选。
+6. 论文主表只使用同分辨率结果；E001–E030必须明确标为历史结构筛选，E031与后续M0/K1不得声称为严格同batch受控比较。
 
 可选性能上限方向（未实现、未授权运行）：256×128下T12对全部128个patch等权计算重建损失，背景区域仍可能稀释身份监督。如后续明确授权结构改进，唯一优先候选是使用`detach`后的SFTS共享mask加权逐token余弦重建损失；E031不引入该变化，以隔离结构因素。
 
