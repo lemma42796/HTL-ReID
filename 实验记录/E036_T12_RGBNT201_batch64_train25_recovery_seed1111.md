@@ -1,7 +1,8 @@
 # E036｜RGBNT201 T12 batch 64提前停止恢复验证
 
-- 状态：待启动
+- 状态：运行中
 - 登记时间：2026-08-27 17:56 CST
+- 开始时间：2026-08-27 17:58 CST
 - 对应论文实验：T12-B64-REC25
 - 实验目的：恢复E031的batch 64与原始学习率，只删除最佳点之后的训练，验证能否在约一半时间内复现71.54 mAP / 75.24 Rank-1阶段性最高性能。
 - 单变量关系：相对E031仅将实际训练停止点从50改为25 epoch；`MAX_EPOCHS=50`，因此前25 epoch的cosine与warm-up轨迹、模型、batch、优化器、学习率、seed、输入、数据增强和评估协议均与E031一致。
@@ -13,6 +14,7 @@
 - Scheduler / warm-up：50-epoch cosine horizon；前10 epoch从0.1倍LR线性warm-up；按epoch步进；epoch 25提前停止。
 - 模型设置：共享ViT-B/16；固定K=1 SFTS共享mask；三轮FACR；训练期共享跨模态token重建，hidden dim 256、损失系数0.1、前5 epoch auxiliary warm-up。
 - 预训练权重：`/root/autodl-tmp/pretrained/vit_base_patch16_224_augreg2_in21k_ft_in1k.pth`
+- 训练代码commit：`33b006b`
 - 计划命令：`/root/miniconda3/bin/python tools/run_rgbnt201_fusion.py --single-experiment E036 --single-row T12-B64-REC25 --single-config configs/RGBNT201/fusion/t12_sfts_k1_shared_token_recon_b64_25e.yml --single-output-name E036_T12_batch64_train25_recovery_seed1111 --seed 1111 --expected-train-epochs 25 --expected-base-lr 0.00035 --expected-batch-size 64`；runner内部强制`timeout --signal=TERM --kill-after=10s 30m`。
 - 输出目录：`/root/autodl-tmp/outputs/HTL-ReID/E036_T12_batch64_train25_recovery_seed1111`
 - Runner日志：`/root/autodl-tmp/outputs/HTL-ReID/E036_T12_batch64_train25_recovery_seed1111.runner.log`，位于目标输出目录之外。
@@ -20,3 +22,5 @@
 - 墙钟上限：30分钟；预计约7–8分钟，但以实际结果为准。
 - 判断口径：完整25 epoch无OOM、NaN、Traceback、超时或显存不稳定；最佳结果达到或在确定性误差范围内复现E031的71.54 mAP / 75.24 Rank-1，且显著高于E035的68.23 / 73.68，才认为恢复成功。
 - 是否进入论文：模型尚未定稿，本次只确认batch 64提前停止协议，不触发M0/K1消融。
+- 启动信息：runner PID 12047，GNU timeout PID 12049，训练主进程PID 12050；其余同命令进程为14个DataLoader worker。
+- 启动检查：RTX 5090上CUDA训练已进入并完成epoch 1训练，batch 64对应每epoch 54 iterations；日志确认`training 25/50 scheduler epochs`，首轮warm-up日志LR为5.95e-5，与E031一致。训练速度约269.5 samples/s，启动阶段主进程显存约5,290 MiB，无OOM、NaN或配置错误，30分钟硬超时已生效。按运行纪律不继续轮询。
