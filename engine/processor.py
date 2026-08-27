@@ -159,6 +159,10 @@ def do_train(cfg,
     updates_per_epoch = len(train_loader)
 
     best_index = {'mAP': 0, "Rank-1": 0, 'Rank-5': 0, 'Rank-10': 0}
+    best_rank1 = 0.0
+    target_map = float(getattr(cfg.SOLVER, 'TARGET_MAP', 0.0))
+    target_rank1 = float(getattr(cfg.SOLVER, 'TARGET_RANK1', 0.0))
+    target_checkpoint_saved = False
     for epoch in range(1, run_epochs + 1):
         target_history_start = len(_reconstruction_history(model))
         start_time = time.time()
@@ -267,6 +271,23 @@ def do_train(cfg,
                         best_index['Rank-10'] = cmc[9]
                         if save_best_checkpoint:
                             torch.save(model.state_dict(), os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + '_best.pth'))
+                    if float(cmc[0]) >= best_rank1:
+                        best_rank1 = float(cmc[0])
+                        if save_best_checkpoint:
+                            torch.save(
+                                model.state_dict(),
+                                os.path.join(
+                                    cfg.OUTPUT_DIR,
+                                    cfg.MODEL.NAME + '_best_rank1.pth'))
+                    if (not target_checkpoint_saved and target_map > 0.0 and
+                            target_rank1 > 0.0 and float(mAP) >= target_map and
+                            float(cmc[0]) >= target_rank1):
+                        torch.save(
+                            model.state_dict(),
+                            os.path.join(
+                                cfg.OUTPUT_DIR,
+                                cfg.MODEL.NAME + '_target.pth'))
+                        target_checkpoint_saved = True
                     logger.info("Best Multi-Modal mAP: {:.2%}".format(best_index['mAP']))
                     logger.info("Best Multi-Modal Rank-1: {:.2%}".format(best_index['Rank-1']))
                     logger.info("Best Multi-Modal Rank-5: {:.2%}".format(best_index['Rank-5']))
@@ -310,6 +331,23 @@ def do_train(cfg,
                     best_index['Rank-10'] = cmc[9]
                     if save_best_checkpoint:
                         torch.save(model.state_dict(), os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + '_best.pth'))
+                if float(cmc[0]) >= best_rank1:
+                    best_rank1 = float(cmc[0])
+                    if save_best_checkpoint:
+                        torch.save(
+                            model.state_dict(),
+                            os.path.join(
+                                cfg.OUTPUT_DIR,
+                                cfg.MODEL.NAME + '_best_rank1.pth'))
+                if (not target_checkpoint_saved and target_map > 0.0 and
+                        target_rank1 > 0.0 and float(mAP) >= target_map and
+                        float(cmc[0]) >= target_rank1):
+                    torch.save(
+                        model.state_dict(),
+                        os.path.join(
+                            cfg.OUTPUT_DIR,
+                            cfg.MODEL.NAME + '_target.pth'))
+                    target_checkpoint_saved = True
                 logger.info("Best Multi-Modal mAP: {:.2%}".format(best_index['mAP']))
                 logger.info("Best Multi-Modal Rank-1: {:.2%}".format(best_index['Rank-1']))
                 logger.info("Best Multi-Modal Rank-5: {:.2%}".format(best_index['Rank-5']))

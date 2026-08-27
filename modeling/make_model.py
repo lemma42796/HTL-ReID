@@ -291,6 +291,8 @@ class HTLReID(nn.Module):
             cfg.MODEL.CROSS_MODAL_RECON_ENABLED)
         self.cross_modal_recon_loss_weight = float(
             cfg.MODEL.CROSS_MODAL_RECON_LOSS_WEIGHT)
+        self.hetero_triplet_weight = float(cfg.MODEL.HETERO_TRIPLET_WEIGHT)
+        self.hetero_triplet_margin = float(cfg.MODEL.HETERO_TRIPLET_MARGIN)
         self._last_facr_stats_epoch = None
         if sum((self.use_agf, self.use_tpm, self.use_facr)) > 1:
             raise ValueError('MODEL.AGF, MODEL.TPM, and MODEL.FACR are mutually exclusive')
@@ -316,6 +318,10 @@ class HTLReID(nn.Module):
         if self.use_cross_modal_recon and self.cross_modal_recon_loss_weight == 0.0:
             raise ValueError(
                 'enabled cross-modal reconstruction requires a positive loss weight')
+        if self.hetero_triplet_weight < 0.0:
+            raise ValueError('HETERO_TRIPLET_WEIGHT must be non-negative')
+        if self.hetero_triplet_margin < 0.0:
+            raise ValueError('HETERO_TRIPLET_MARGIN must be non-negative')
         self.use_ocfr = bool(cfg.MODEL.OCFR)
         self.use_quality = bool(cfg.MODEL.QUALITY_AWARE)
         self.use_adapter = bool(cfg.MODEL.MODALITY_ADAPTER)
@@ -338,6 +344,14 @@ class HTLReID(nn.Module):
         self.test_part_feat_weight = float(cfg.TEST.PART_FEAT_WEIGHT)
         if self.test_part_feat not in ('off', 'concat', 'only'):
             raise ValueError("TEST.PART_FEAT must be 'off', 'concat', or 'only'")
+        self.test_original_cls_feat = cfg.TEST.ORIGINAL_CLS_FEAT.lower()
+        self.test_original_cls_feat_weight = float(
+            cfg.TEST.ORIGINAL_CLS_FEAT_WEIGHT)
+        if self.test_original_cls_feat not in ('off', 'concat', 'only'):
+            raise ValueError(
+                "TEST.ORIGINAL_CLS_FEAT must be 'off', 'concat', or 'only'")
+        if self.test_original_cls_feat_weight < 0.0:
+            raise ValueError('TEST.ORIGINAL_CLS_FEAT_WEIGHT must be non-negative')
 
         self.selected_patch_blend_weight = float(cfg.MODEL.SELECTED_PATCH_BLEND_WEIGHT)
         self.selected_patch_context = cfg.MODEL.SELECTED_PATCH_CONTEXT.lower()
@@ -394,6 +408,9 @@ class HTLReID(nn.Module):
                 dim=self.BACKBONE.token_dim,
                 hidden_dim=cfg.MODEL.CROSS_MODAL_RECON_HIDDEN_DIM,
                 target_seed=cfg.SOLVER.SEED,
+                all_targets=bool(cfg.MODEL.CROSS_MODAL_RECON_ALL_TARGETS),
+                smooth_l1_weight=(
+                    cfg.MODEL.CROSS_MODAL_RECON_SMOOTH_L1_WEIGHT),
             )
         if self.use_agf:
             self.AGF = AGF(dim=self.BACKBONE.token_dim,
@@ -751,18 +768,68 @@ class HTLReID(nn.Module):
                                          quality_scores=quality_scores)
 
     def _test_descriptor(self, cls4t, rgb_feat, nir_feat, tir_feat, quality_scores=None, masks=None):
-        if self.test_part_feat == 'off' or not self.use_part:
+        original_cls = torch.cat([
+            rgb_feat[:, 0, :], nir_feat[:, 0, :], tir_feat[:, 0, :]
+        ], dim=-1)
+        if self.test_original_cls_feat == 'only':
+            return original_cls
+
+        use_part = self.test_part_feat != 'off' and self.use_part
+        use_original = self.test_original_cls_feat == 'concat'
+        if not use_part and not use_original:
             return cls4t
 
-        part_feat = self._part_feature(rgb_feat, nir_feat, tir_feat, quality_scores, masks)
-        part_feat = F.normalize(part_feat, dim=-1) * self.test_part_feat_weight
-        if self.test_part_feat == 'only':
-            return part_feat
+        descriptors = [F.normalize(cls4t, dim=-1)]
+        if use_original:
+            descriptors.append(
+                F.normalize(original_cls, dim=-1) *
+                self.test_original_cls_feat_weight)
 
-        cls4t = F.normalize(cls4t, dim=-1)
-        return torch.cat([cls4t, part_feat], dim=-1)
+        if use_part:
+            part_feat = self._part_feature(
+                rgb_feat, nir_feat, tir_feat, quality_scores, masks)
+            part_feat = F.normalize(part_feat, dim=-1) * self.test_part_feat_weight
+            if self.test_part_feat == 'only':
+                return part_feat
+            descriptors.append(part_feat)
+        return torch.cat(descriptors, dim=-1)
 
-    def _auxiliary_losses(self, rgb_feat, nir_feat, tir_feat, masks, quality_scores, has_tir=True):
+    def _hetero_triplet_loss(self, cls_list, labels, has_tir=True):
+        """Supervised batch-hard triplet across different modality features."""
+        reference = cls_list[0]
+        if self.hetero_triplet_weight == 0.0:
+            return torch.zeros(
+                (), device=reference.device, dtype=reference.dtype)
+        if labels is None:
+            raise ValueError('heterogeneous triplet loss requires identity labels')
+
+        active = cls_list if has_tir else cls_list[:2]
+        normalized = [F.normalize(feature.float(), dim=-1) for feature in active]
+        positive_mask = labels[:, None].eq(labels[None, :])
+        negative_mask = ~positive_mask
+        losses = []
+        for source_index, source in enumerate(normalized):
+            for target_index, target in enumerate(normalized):
+                if source_index == target_index:
+                    continue
+                distance = torch.cdist(source, target, p=2)
+                hard_positive = distance.masked_fill(
+                    ~positive_mask, float('-inf')).amax(dim=1)
+                hard_negative = distance.masked_fill(
+                    ~negative_mask, float('inf')).amin(dim=1)
+                valid = torch.isfinite(hard_positive) & torch.isfinite(hard_negative)
+                if valid.any():
+                    losses.append(F.relu(
+                        hard_positive[valid] - hard_negative[valid] +
+                        self.hetero_triplet_margin).mean())
+        if not losses:
+            return torch.zeros(
+                (), device=reference.device, dtype=reference.dtype)
+        return (self.hetero_triplet_weight * torch.stack(losses).mean()
+                ).to(dtype=reference.dtype)
+
+    def _auxiliary_losses(self, rgb_feat, nir_feat, tir_feat, masks,
+                          quality_scores, has_tir=True, labels=None):
         loss = torch.zeros((), device=rgb_feat.device)
         cls_list = [rgb_feat[:, 0, :], nir_feat[:, 0, :], tir_feat[:, 0, :]]
         if quality_scores is None:
@@ -773,6 +840,9 @@ class HTLReID(nn.Module):
         valid_pairs = [(0, 1)]
         if has_tir:
             valid_pairs += [(0, 2), (1, 2)]
+
+        loss = loss + self._hetero_triplet_loss(
+            cls_list, labels, has_tir=has_tir)
 
         if self.align_loss_weight > 0:
             align = torch.zeros_like(loss)
@@ -928,7 +998,8 @@ class HTLReID(nn.Module):
             else:
                 loss_aux = torch.zeros((), device=RGB_feat.device)
             loss_aux = loss_aux + self._auxiliary_losses(
-                RGB_feat, NIR_feat, TIR_feat, mask, quality_scores, has_tir=True)
+                RGB_feat, NIR_feat, TIR_feat, mask, quality_scores,
+                has_tir=True, labels=label)
             loss_aux = loss_aux + self._quality_dropout_loss(quality_scores, keep_mask)
             loss_aux = loss_aux + self._selector_regularization(RGB_feat)
             loss_aux = loss_aux + self._facr_regularization(RGB_feat)
@@ -1054,7 +1125,8 @@ class HTLReID(nn.Module):
             else:
                 loss_aux = torch.zeros((), device=RGB_feat.device)
             loss_aux = loss_aux + self._auxiliary_losses(
-                RGB_feat, NIR_feat, TIR_feat_s, mask, quality_scores, has_tir=False)
+                RGB_feat, NIR_feat, TIR_feat_s, mask, quality_scores,
+                has_tir=False, labels=label)
             loss_aux = loss_aux + self._quality_dropout_loss(quality_scores, keep_mask)
             loss_aux = loss_aux + self._selector_regularization(RGB_feat)
             score = self.FUSE_HEAD(self.FUSE_BN(cls4t))

@@ -24,13 +24,19 @@ class SharedCrossModalTokenReconstruction(nn.Module):
 
     NUM_MODALITIES = 3
 
-    def __init__(self, dim, hidden_dim=256, target_seed=0):
+    def __init__(self, dim, hidden_dim=256, target_seed=0,
+                 all_targets=False, smooth_l1_weight=0.0):
         super().__init__()
         self.dim = int(dim)
         self.hidden_dim = int(hidden_dim)
+        self.all_targets = bool(all_targets)
+        self.smooth_l1_weight = float(smooth_l1_weight)
         if self.dim <= 0 or self.hidden_dim <= 0:
             raise ValueError(
                 'cross-modal reconstruction dimensions must be positive')
+        if self.smooth_l1_weight < 0.0:
+            raise ValueError(
+                'cross-modal reconstruction Smooth L1 weight must be non-negative')
 
         self.modality_embedding = nn.Parameter(
             torch.empty(self.NUM_MODALITIES, self.hidden_dim))
@@ -90,24 +96,38 @@ class SharedCrossModalTokenReconstruction(nn.Module):
         context = context + self.modality_embedding[target_index].view(1, 1, -1)
         return self.predictor(context)
 
+    def _target_loss(self, features, target_index):
+        """Return scale-stable token reconstruction loss for one target."""
+        prediction = self.predict(features, target_index)
+        teacher = features[target_index][:, 1:, :].detach()
+        # Compute similarities in fp32 under AMP. Normalizing both terms keeps
+        # the optional Smooth L1 component commensurate with cosine distance.
+        prediction = F.normalize(prediction.float(), dim=-1, eps=1e-6)
+        teacher = F.normalize(teacher.float(), dim=-1, eps=1e-6)
+        cosine = 1.0 - (prediction * teacher).sum(dim=-1).mean()
+        if self.smooth_l1_weight == 0.0:
+            return cosine
+        regression = F.smooth_l1_loss(prediction, teacher)
+        return cosine + self.smooth_l1_weight * regression
+
     def forward(self, features, target_index=None):
-        """Return normalized cosine reconstruction loss for one target."""
+        """Return reconstruction loss for one target or all three targets."""
         self._validate_features(features)
-        if target_index is None:
+        if target_index is not None:
+            target_indices = (int(target_index),)
+        elif self.all_targets:
+            target_indices = tuple(range(self.NUM_MODALITIES))
+        else:
             target_index = int(torch.randint(
                 self.NUM_MODALITIES, (1,),
                 generator=self._target_generator).item())
-        target_index = int(target_index)
+            target_indices = (target_index,)
 
-        prediction = self.predict(features, target_index)
-        teacher = features[target_index][:, 1:, :].detach()
-        # Compute the similarity in fp32 under AMP.  Casting does not interrupt
-        # gradients from the predictor and source modalities.
-        prediction = F.normalize(prediction.float(), dim=-1, eps=1e-6)
-        teacher = F.normalize(teacher.float(), dim=-1, eps=1e-6)
-        loss = 1.0 - (prediction * teacher).sum(dim=-1).mean()
-        self._target_history.append(target_index)
-        self._last_target_index = target_index
+        losses = [self._target_loss(features, index) for index in target_indices]
+        loss = torch.stack(losses).mean()
+        self._target_history.extend(target_indices)
+        self._last_target_index = (target_indices[0] if len(target_indices) == 1
+                                   else tuple(target_indices))
         self._last_loss = loss.detach()
         return loss
 

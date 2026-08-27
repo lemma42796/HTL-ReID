@@ -37,7 +37,7 @@ DEFAULT_SEED = 1111
 BATCH_SIZE = 128
 EVAL_PERIOD = 1
 INPUT_SIZE = (256, 128)
-SUPPORTED_BACKBONE_LR_FACTORS = (0.2, 0.8)
+SUPPORTED_BACKBONE_LR_FACTORS = (0.1, 0.2, 0.8)
 
 EPOCH_PATTERN = re.compile(r"Validation Results - Epoch:\s+(\d+)")
 MAP_PATTERN = re.compile(r"mAP:\s+([0-9.]+)%")
@@ -51,7 +51,12 @@ RANK_PATTERNS = {
 def resolve_config(row_config, output_dir, seed=DEFAULT_SEED,
                    expected_train_epochs=TRAIN_EPOCHS,
                    expected_base_lr=3.5e-4,
-                   expected_batch_size=BATCH_SIZE):
+                   expected_batch_size=BATCH_SIZE,
+                   expected_max_epochs=None,
+                   expected_backbone_lr_factor=None,
+                   expected_warmup_iters=10,
+                   expected_resume_path='',
+                   expected_strict_determinism=None):
     cfg = default_cfg.clone()
     cfg.merge_from_file(BASE_CONFIG)
     cfg.merge_from_file(row_config)
@@ -64,6 +69,11 @@ def resolve_config(row_config, output_dir, seed=DEFAULT_SEED,
                 expected_train_epochs, cfg.SOLVER.TRAIN_EPOCHS))
     if int(cfg.SOLVER.SEED) != int(seed):
         raise ValueError("fusion row seed override was not applied")
+    if (expected_max_epochs is not None and
+            int(cfg.SOLVER.MAX_EPOCHS) != int(expected_max_epochs)):
+        raise ValueError(
+            "expected scheduler horizon {} epochs, got {}".format(
+                expected_max_epochs, cfg.SOLVER.MAX_EPOCHS))
     if int(cfg.SOLVER.IMS_PER_BATCH) != int(expected_batch_size):
         raise ValueError(
             "expected batch size {}, got {}".format(
@@ -84,10 +94,18 @@ def resolve_config(row_config, output_dir, seed=DEFAULT_SEED,
         raise ValueError(
             "RGBNT201 runner supports backbone LR factors {}, got {}".format(
                 SUPPORTED_BACKBONE_LR_FACTORS, backbone_lr_factor))
+    if (expected_backbone_lr_factor is not None and
+            abs(backbone_lr_factor -
+                float(expected_backbone_lr_factor)) > 1e-12):
+        raise ValueError(
+            "expected backbone LR factor {}, got {}".format(
+                expected_backbone_lr_factor, backbone_lr_factor))
     if abs(float(cfg.SOLVER.WARMUP_FACTOR) - 0.1) > 1e-12:
         raise ValueError("all RGBNT201 paper rows must warm up from 0.1x LR")
-    if int(cfg.SOLVER.WARMUP_ITERS) != 10:
-        raise ValueError("all RGBNT201 paper rows must use 10 warm-up epochs")
+    if int(cfg.SOLVER.WARMUP_ITERS) != int(expected_warmup_iters):
+        raise ValueError(
+            "expected {} warm-up epochs, got {}".format(
+                expected_warmup_iters, cfg.SOLVER.WARMUP_ITERS))
     if str(cfg.SOLVER.SCHEDULER_UNIT).lower() != "epoch":
         raise ValueError("RGBNT201 paper warm-up and cosine schedule must use epochs")
     if float(cfg.INPUT.GRAY_REPLACE_PROB) != 0.0:
@@ -96,8 +114,19 @@ def resolve_config(row_config, output_dir, seed=DEFAULT_SEED,
         raise ValueError("RGBNT201 paper rows must disable modality dropout")
     if str(cfg.TEST.RE_RANKING).lower() != "no":
         raise ValueError("fusion rows must disable re-ranking")
-    if cfg.MODEL.PRETRAIN_CHOICE != "imagenet" or cfg.MODEL.RESUME_PATH:
-        raise ValueError("each row must start independently from ImageNet weights")
+    if cfg.MODEL.PRETRAIN_CHOICE != "imagenet":
+        raise ValueError("RGBNT201 rows must initialize the backbone from ImageNet")
+    if str(cfg.MODEL.RESUME_PATH) != str(expected_resume_path):
+        raise ValueError(
+            "expected resume path {!r}, got {!r}".format(
+                expected_resume_path, cfg.MODEL.RESUME_PATH))
+    if (expected_strict_determinism is not None and
+            int(cfg.SOLVER.STRICT_DETERMINISM) !=
+            int(expected_strict_determinism)):
+        raise ValueError(
+            "expected STRICT_DETERMINISM {}, got {}".format(
+                expected_strict_determinism,
+                cfg.SOLVER.STRICT_DETERMINISM))
     return cfg
 
 
@@ -146,7 +175,12 @@ def run_row(args, timeout_bin, commit, experiment, row, row_config,
         row_config, output_dir, seed=args.seed,
         expected_train_epochs=args.expected_train_epochs,
         expected_base_lr=args.expected_base_lr,
-        expected_batch_size=args.expected_batch_size)
+        expected_batch_size=args.expected_batch_size,
+        expected_max_epochs=args.expected_max_epochs,
+        expected_backbone_lr_factor=args.expected_backbone_lr_factor,
+        expected_warmup_iters=args.expected_warmup_iters,
+        expected_resume_path=args.expected_resume_path,
+        expected_strict_determinism=args.expected_strict_determinism)
     output_dir.joinpath("resolved_config.yml").write_text(cfg.dump(), encoding="utf-8")
     output_dir.joinpath("commit.txt").write_text(commit + "\n", encoding="utf-8")
     command = [
@@ -218,6 +252,12 @@ def main():
         "--expected-base-lr", type=float, default=3.5e-4)
     parser.add_argument(
         "--expected-batch-size", type=int, default=BATCH_SIZE)
+    parser.add_argument("--expected-max-epochs", type=int)
+    parser.add_argument("--expected-backbone-lr-factor", type=float)
+    parser.add_argument("--expected-warmup-iters", type=int, default=10)
+    parser.add_argument("--expected-resume-path", default='')
+    parser.add_argument(
+        "--expected-strict-determinism", type=int, choices=(0, 1))
     args = parser.parse_args()
     args.repo_root = args.repo_root.resolve()
     args.output_root = args.output_root.resolve()
@@ -229,6 +269,13 @@ def main():
         parser.error("--expected-base-lr must be positive")
     if args.expected_batch_size <= 0:
         parser.error("--expected-batch-size must be positive")
+    if args.expected_max_epochs is not None and args.expected_max_epochs <= 0:
+        parser.error("--expected-max-epochs must be positive")
+    if (args.expected_backbone_lr_factor is not None and
+            args.expected_backbone_lr_factor <= 0):
+        parser.error("--expected-backbone-lr-factor must be positive")
+    if args.expected_warmup_iters < 0:
+        parser.error("--expected-warmup-iters must be non-negative")
 
     single_values = (
         args.single_experiment, args.single_row,
@@ -249,7 +296,12 @@ def main():
             row_config, output_dir, seed=args.seed,
             expected_train_epochs=args.expected_train_epochs,
             expected_base_lr=args.expected_base_lr,
-            expected_batch_size=args.expected_batch_size)
+            expected_batch_size=args.expected_batch_size,
+            expected_max_epochs=args.expected_max_epochs,
+            expected_backbone_lr_factor=args.expected_backbone_lr_factor,
+            expected_warmup_iters=args.expected_warmup_iters,
+            expected_resume_path=args.expected_resume_path,
+            expected_strict_determinism=args.expected_strict_determinism)
         plan.append({
             "experiment": experiment,
             "row": row,
@@ -269,6 +321,9 @@ def main():
                 resolved_cfg.SOLVER.BACKBONE_LR_FACTOR),
             "backbone_lr": float(resolved_cfg.SOLVER.BASE_LR) * float(
                 resolved_cfg.SOLVER.BACKBONE_LR_FACTOR),
+            "resume_path": str(resolved_cfg.MODEL.RESUME_PATH),
+            "strict_determinism": int(
+                resolved_cfg.SOLVER.STRICT_DETERMINISM),
             "eval_period": EVAL_PERIOD,
             "re_ranking": "no",
             "time_limit_per_row": TIME_LIMIT,

@@ -130,6 +130,11 @@ _C.MODEL.FACR_ROUTE_BALANCE_WEIGHT = 0.0
 _C.MODEL.CROSS_MODAL_RECON_ENABLED = 0
 _C.MODEL.CROSS_MODAL_RECON_HIDDEN_DIM = 256
 _C.MODEL.CROSS_MODAL_RECON_LOSS_WEIGHT = 0.1
+_C.MODEL.CROSS_MODAL_RECON_ALL_TARGETS = 0
+_C.MODEL.CROSS_MODAL_RECON_SMOOTH_L1_WEIGHT = 0.0
+# Supervised batch-hard metric loss across different modality CLS features.
+_C.MODEL.HETERO_TRIPLET_WEIGHT = 0.0
+_C.MODEL.HETERO_TRIPLET_MARGIN = 0.3
 # OCFR auxiliary loss (not in paper); off by default for paper-faithful reproduction
 _C.MODEL.OCFR = 0
 # Ablation switches (1=enable, 0=disable)
@@ -291,6 +296,9 @@ _C.MODEL.NO_MARGIN = True
 _C.SOLVER.CHECKPOINT_PERIOD = 60
 # Keep the best model weights for independent testing and evidence.
 _C.SOLVER.SAVE_BEST_CHECKPOINT = True
+# Optional single-run target checkpoint. Values are fractions in [0, 1].
+_C.SOLVER.TARGET_MAP = 0.0
+_C.SOLVER.TARGET_RANK1 = 0.0
 # Periodic epoch weights are disabled by default to keep AutoDL disk usage low.
 _C.SOLVER.SAVE_PERIODIC_CHECKPOINTS = False
 # iteration of display training log
@@ -325,6 +333,8 @@ _C.TEST.FEAT_NORM = 'yes'
 # normalized part descriptor; set to 'off' to use the fused descriptor alone.
 _C.TEST.PART_FEAT = 'off'
 _C.TEST.PART_FEAT_WEIGHT = 0.3
+_C.TEST.ORIGINAL_CLS_FEAT = 'off'
+_C.TEST.ORIGINAL_CLS_FEAT_WEIGHT = 0.5
 # ----------------------------------------------------------a------------------ #
 # Misc options
 # ---------------------------------------------------------------------------- #
