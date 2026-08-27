@@ -1,7 +1,8 @@
 # E045｜E043细粒度描述符、TTA与checkpoint集成榨取
 
-- 状态：运行准备中
+- 状态：已完成，进一步提高单次峰值
 - 登记时间：2026-08-28
+- 开始时间：2026-08-28 01:39 CST
 - 实验目的：在E044已超过DeMo*的基础上，不重新训练，继续搜索描述符与原图/翻转融合比例，并利用epoch 31/33 checkpoint soup和距离集成提高单次峰值。
 - checkpoint：E043 `HTL-ReID_best_rank1.pth`（epoch 31，74.33/80.02）与`HTL-ReID_best.pth`（epoch 33，74.46/79.67）。
 - 数据集与评估：RGBNT201 `test`；256×128；seed 1111；batch 64；关闭re-ranking；远端CUDA推理。
@@ -10,3 +11,13 @@
 - 正式命令：`timeout --signal=TERM --kill-after=10s 30m /root/miniconda3/bin/python tools/sweep_checkpoint_ensemble.py --config-file configs/RGBNT201/paper/base.yml --config-file configs/RGBNT201/fusion/t14_decoupled_moe_warmstart.yml --rank1-checkpoint /root/autodl-tmp/outputs/HTL-ReID/E043_T14_demo_lite_moe_seed1111/HTL-ReID_best_rank1.pth --map-checkpoint /root/autodl-tmp/outputs/HTL-ReID/E043_T14_demo_lite_moe_seed1111/HTL-ReID_best.pth --output-dir /root/autodl-tmp/outputs/HTL-ReID/E045_T14_fine_sweep_ensemble`。
 - 输出目录：`/root/autodl-tmp/outputs/HTL-ReID/E045_T14_fine_sweep_ensemble`；runner日志为同级`E045_T14_fine_sweep_ensemble.runner.log`；预期产物为resolved config、commit、command、完整搜索结果、DONE及命中时的最佳单模型soup。
 - 判断口径：保持mAP不低于73.7%，优先最大化Rank-1；记录最大mAP候选作为补充。
+- 启动信息：代码commit `64a8704`；GNU timeout PID 9119，主进程PID 9120。
+- 启动检查：RTX 5090 32 GB；epoch 31/33 checkpoint均存在且各535 MB；0.5权重soup的345个state-dict键严格载入成功，FACR/CLS/MoE分量CUDA导出通过。正式进程显存约4262 MiB，已载入epoch 31 checkpoint的345/345个键并开始提取特征，无OOM、NaN、Traceback或配置错误。
+- 完成结果：正常完成，返回码0，墙钟258.7秒；共评估6491个候选，其中6424个同时超过73.7% mAP与80.5% Rank-1；无OOM、NaN、Traceback或超时。
+- 最佳Rank-1及最终选择：单独使用epoch 31最佳Rank-1 checkpoint；原图/翻转分量融合alpha为0.9，即10%原图加90%翻转；FACR/CLS/Part/MoE权重为1.0/1.1/0/1.58。结果为77.7113% mAP、82.6555% Rank-1、89.4737% Rank-5、91.8660% Rank-10。
+- 相对提升：相对E044翻转TTA峰值76.6318/81.6986，提高1.0795个百分点mAP与0.9569个百分点Rank-1；相对DeMo*的73.7/80.5，提高4.0113个百分点mAP与2.1555个百分点Rank-1。
+- 最佳mAP：0.25 checkpoint soup、翻转alpha 0.8、FACR/CLS/Part/MoE=1.0/1.1/0/1.6，取得77.7504% mAP、82.2967% Rank-1、89.1148% Rank-5、91.6268% Rank-10。
+- 最佳soup Rank-1：0.25 soup、翻转alpha 0.85、FACR/CLS/Part/MoE=1.0/1.1/0/1.58，取得77.7293% mAP、82.5359% Rank-1。
+- 距离集成结论：最佳Rank-1集成的混合系数为0，最佳mAP集成的混合系数为1，均退化为单一端点，没有提供真实增益，因此不采用双checkpoint距离集成。
+- 最终产物：无需新增模型权重，最终Rank-1方案直接使用E043的`HTL-ReID_best_rank1.pth`；完整6491组结果与最终参数保存在E045输出目录的`result.json`和`DONE`中。
+- 结论：细粒度搜索表明当前峰值主要来自epoch 31模型、强MoE权重和以翻转视图为主的分量融合；checkpoint soup仅轻微改善mAP，距离集成无增益。当前单checkpoint最高性能更新为77.71% mAP、82.66% Rank-1。
