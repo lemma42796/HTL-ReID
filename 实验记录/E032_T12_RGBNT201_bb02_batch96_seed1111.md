@@ -1,8 +1,9 @@
 # E032｜RGBNT201 T12 backbone低学习率 + batch 96筛选
 
-- 状态：运行中
+- 状态：已完成；不保留该低backbone LR组合
 - 登记时间：2026-08-27 16:48 CST
 - 开始时间：2026-08-27 16:51 CST
+- 完成时间：2026-08-27 17:03 CST
 - 对应实验：T12-OPT1
 - 实验目的：在赶时间的batch 96筛选协议下，检验将预训练ViT backbone学习率因子从0.8降至0.2能否减少E031在epoch 17后的指标回落。
 - 变化与限制：T12结构、新模块学习率、损失、输入和评估不变；相对E031同时将batch从64改为96、backbone LR factor从0.8改为0.2，因此本次只是快速性能筛选，不能对两个因素分别作因果归因。
@@ -18,10 +19,12 @@
 - 计划命令：`/root/miniconda3/bin/python tools/run_rgbnt201_fusion.py --single-experiment E032 --single-row T12-OPT1 --single-config configs/RGBNT201/fusion/t12_sfts_k1_shared_token_recon_bb02.yml --single-output-name E032_T12_opt_bb02_batch96_seed1111 --seed 1111`；runner内部强制`timeout --signal=TERM --kill-after=10s 30m`。
 - 输出目录：`/root/autodl-tmp/outputs/HTL-ReID/E032_T12_opt_bb02_batch96_seed1111`
 - Runner日志：`/root/autodl-tmp/outputs/HTL-ReID/E032_T12_opt_bb02_batch96_seed1111.runner.log`
-- Runner PID：1648；GNU timeout PID：1650；训练主进程PID：1651。
-- 预期产物：`resolved_config.yml`、`commit.txt`、`command.txt`、`stdout.log`、`train_log.txt`、`run_result.json`、`DONE/FAILED`标记、TensorBoard事件和最佳checkpoint。
+- Runner PID：1648；GNU timeout PID：1650；训练主进程PID：1651；均已退出。
+- 实际产物：`resolved_config.yml`、`commit.txt`、`command.txt`、`stdout.log`、`train_log.txt`、`run_result.json`、`DONE`标记、TensorBoard事件和`HTL-ReID_best.pth`；输出目录约432 MB。
 - 墙钟上限：30分钟。
 - 判断口径：首先检查batch 96是否在32 GB RTX 5090上无OOM/NaN并缩短耗时；精度与E031的71.54 mAP / 75.24 Rank-1作粗略筛选比较，但不声称单变量改进。
 - 启动检查：远端为RTX 5090 32 GB，无其他训练进程；数据集、预训练权重和目标路径正常。resolved config确认batch 96、Adam、50 epoch、backbone LR factor 0.2、re-ranking关闭；epoch 1以0.371秒/batch完成，GPU利用率99%，无OOM、NaN或配置错误。进程列表中其余同命令PID为14个DataLoader worker，不是重复训练。
 - 运行中显存快照：2026-08-27 16:57 CST，训练进程占用21,478 MiB，GPU总占用21,504/32,607 MiB，剩余10,608 MiB。基于该快照，下一次筛选将先尝试batch 128；若完整运行无OOM、NaN、超时或显存不稳定，后续RGBNT201筛选统一使用batch 128，否则回退batch 96。
-- 结果与结论：待运行。
+- 完成结果：returncode 0，墙钟793.6秒（约13分14秒）；最佳epoch 6，mAP 67.98%、Rank-1 69.62%、Rank-5 80.50%、Rank-10 86.48%；re-ranking关闭。epoch 50为67.24% / 69.98% / 82.06% / 86.48%。无OOM、NaN、Traceback、超时或残留进程。
+- 相对E031：mAP -3.56、Rank-1 -5.62、Rank-5 -3.35、Rank-10 -0.24个百分点；墙钟缩短101.8秒（约11.4%）。由于batch 64→96与backbone LR factor 0.8→0.2同时变化，不能将退化单独归因于任一因素。
+- 结论：batch 96在RTX 5090 32 GB上稳定运行，但“batch 96 + backbone LR 7e-5”组合精度明显低于E031，不保留低backbone LR设置。下一次batch 128显存验证不应继续使用factor 0.2；应基于当时已选定的模型与学习率协议单独更改batch。
