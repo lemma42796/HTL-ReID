@@ -1,231 +1,38 @@
 # HTL-ReID 项目状态与 TODO
 
-> 本文档只保留当前有效状态和未完成事项，不记录会话操作流水。正式实验事实见《实验记录.md》及`实验记录/E*.md`。
+> 最后更新：2026-08-28。本文件每次直接覆盖旧内容，只保留最新状态、未完成的任务和待完成的新任务，不保存历史。
 
-## 一、信息入口
+## 维护约束
 
-- 最后更新：2026-08-27 23:50 CST
-- 项目根目录：`/Users/a123/Documents/reid`
-- 代码目录：`/Users/a123/Documents/reid/HTL-ReID`
-- 远端代码目录：`/root/autodl-tmp/HTL-ReID`
-- 远端登录：正式命令仍使用`autodl-reid`别名
-- SSH别名：本机保存的`autodl-reid`与`autodl-reid-new`仍指向上一台机器，已验证无法连通；第三台机器入口为用户提供的`ssh -p 10112 root@connect.westb.seetacloud.com`，连接前必须把`autodl-reid`更新或通过临时SSH配置解析到该入口；不得误连旧端点
-- 数据集根目录：`/root/autodl-tmp/datasets`
-- 输出根目录：`/root/autodl-tmp/outputs/HTL-ReID`
-- 执行边界：所有测试和可执行检查一律在远端训练机完成；本地仅用于读取/编辑文件和Git操作。模型相关测试必须使用远端CUDA，不得回退到CPU。
-- 实验索引：`/Users/a123/Documents/reid/HTL-ReID/实验记录.md`
-- 本地资料索引：`/Users/a123/Documents/reid/HTL-ReID/本地资料索引.md`；涵盖父目录中的论文集、旧稿源码/PDF/ZIP、审稿意见、数据归档、第三方官方源码和写作参考
+- 正文只允许出现以下三个部分，不增加其他职责；
+- 状态变化时改写“最新状态”，不得在后面追加旧状态；
+- 已开始但尚未结束的事项写入“未完成的任务”；
+- 尚未开始、确认后续需要开展的事项写入“待完成的新任务”；
+- 任务完成后立即删除，其结果转入`实验记录.md`或对应`实验记录/E*.md`；
+- 不记录实验历史、逐次指标、命令、commit、日志路径、产物清单、排障过程、研究边界或长期执行规则。
 
-## 二、当前研究目标
+## 一、最新状态
 
-M0–M3、T1–T12、固定K参数敏感性及三seed T2/K1配对实验已经完成，但E001–E030均使用384×192与20-epoch诊断协议。T12在seed 1111/2222均同时超过配对K1，因此仍作为当前优先结构；E031完成RGBNT201向256×128、Adam、50 epoch和10-epoch warm-up的迁移首跑，使用batch 64，作为阶段性最好结果保留。当前模型尚未定稿，不围绕E031立即补跑M0/K1消融；先继续完善和筛选最终模型，待结构、训练协议和评估口径全部冻结后，再使用完全一致的设置补齐最终模型、K1和M0消融。旧结果只作为结构筛选证据。
+- 模型结构、训练协议和评估口径尚未冻结；当前冲线候选已从T12更新为E043/T14七路解耦MoE及其E045推理配置，但还不能据此开展最终论文消融、跨数据集主结果或正文定稿。
+- 当前单次最高Rank-1结果为E045的77.71 mAP、82.66 Rank-1；最高mAP结果为77.75 mAP、82.30 Rank-1。两者均关闭re-ranking，并已超过DeMo*的73.7 mAP、80.5 Rank-1数值线。
+- 严格确定性稳定基线仍采用E038/E040/E041三seed均值：65.05±4.0 mAP、67.30±3.5 Rank-1；它与E045单次峰值用途不同，不互相替代。
+- E031的71.54 mAP、75.24 Rank-1尚未在严格确定性口径下复现，只作历史参考。
+- RGBNT201外部追赶目标暂按共享、非CLIP、ImageNet预训练的普通ViT口径记录：最低竞争线为HTT w/o MTT（69.0 mAP、70.0 Rank-1），中间追赶线为TOP-ReID单共享Transformer补充结果（71.7 mAP、76.7 Rank-1），最终追赶目标为DeMo*（73.7 mAP、80.5 Rank-1）。这些目标须在模型与评估协议冻结后重新核验，再迁入`论文大修执行方案.md`。
+- 当前主要决策是是否直接冻结T14/E045单次冲线方案，或补做稳定性验证；在该决策前不继续batch、学习率或开放式模块搜索。
+- E042已完成；E031 warm start配合三目标重建、跨模态Triplet、BCC、Part Branch及联合描述符取得单次72.03 mAP、76.56 Rank-1，未达到DeMo*的73.7 / 80.5数值线。
+- E043已完成：最佳mAP checkpoint为74.46 mAP、79.67 Rank-1；最佳Rank-1 checkpoint为74.33 mAP、80.02 Rank-1。mAP已超过DeMo*，同一checkpoint的Rank-1最小差距为0.48个百分点。
+- E044已完成：使用E043最佳Rank-1 checkpoint并关闭re-ranking，无TTA描述符FACR/CLS/Part/MoE=1.0/0.5/0/1.0取得75.55 mAP、81.10 Rank-1，已超过DeMo*；翻转TTA补充峰值为76.63 mAP、81.70 Rank-1。
+- E045已完成：epoch 31单checkpoint配合翻转alpha 0.9及FACR/CLS/Part/MoE=1.0/1.1/0/1.58取得当前最高Rank-1结果77.71 mAP、82.66 Rank-1；0.25 soup的最高mAP为77.75 mAP、82.30 Rank-1；距离集成没有真实增益。
+- E045运行已结束，结果与日志已落盘，当前没有需要保留的远端训练进程，训练机可以关机。下次远端任务仍须重新向用户索取SSH地址。
 
-### RGBNT201性能追赶目标
+## 二、未完成的任务
 
-性能目标按共享、非CLIP、ImageNet预训的普通ViT公平口径固定，不以CLIP-based MambaPro或DeMo†为主要追赶对象。
+1. **候选冻结决策**：尚未决定将T14/E045作为最终单次冲线方案冻结，还是先补做稳定性验证；下一步实验必须先明确目的和判断门槛。
 
-| 层级 | 对照方法 | mAP | Rank-1 | E031（71.54 / 75.24）差距 |
-|---|---|---:|---:|---:|
-| 最低竞争线 | HTT w/o MTT | 69.0% | 70.0% | 已超过 +2.54 / +5.24 |
-| 中间追赶线 | TOP-ReID单共享Transformer补充结果 | 71.7% | 76.7% | 尚差 0.16 / 1.46 |
-| **最终追赶目标** | **DeMo***（共享普通ViT，非CLIP） | **73.7%** | **80.5%** | **尚差 2.16 / 5.26** |
+## 三、待完成的新任务
 
-旧论文稿中的72.8% mAP / 76.5% Rank-1是历史自报结果线，不是最终公平追赶目标。E031只是模型定稿前的单seed阶段性结果；当前主要精度短板是相对DeMo*的Rank-1差距5.26个百分点。最终是否达标只能用定稿模型在冻结协议下的结果判定。
-
-当前融合实验：
-
-| 行 | 方法 | 目的 |
-|---|---|---|
-| T1 / E006 | M0 + 纯TPM | 正确复现TOP-ReID的TPM循环，作为明确引用的对照 |
-| T2 / E007 | M0 + 自适应全连接路由 | 隔离验证动态跨模态路由，不使用FACSS分数 |
-| T3 / E008 | HS/FACSS连续评分 + FACR | 验证token重要性软引导跨模态融合是否超过T1、T2和M2 |
-| T3R / E009 | 零初始化有界FACSS评分 + FACR | 修复强评分先验，重新验证FACSS软引导 |
-| T4 / E010 | FACSS Top-K硬选择 + FACR | 检验真正的选择后融合 |
-| T5–T7 / E011–E018 | SFTS + FACR及固定K敏感性 | 验证SFTS硬选择和K值；K=1与K=16进入候选 |
-| T8 / E019 | K=16 + FACR路由均衡损失 | 已否定：原路由没有明显来源塌缩 |
-| T9 / E020 | 全tokens FACR + 最终自身patch细化 | 已否定：无条件自身信息重读明显退化 |
-| T10 / E021、E024 | K=1 SFTS丢弃信息摘要 + masked FACR自细化 | 额外seed未复现优势；不作为最终精度候选 |
-| T2/K1三seed / E007、E015、E022、E023、E025、E026 | 全tokens T2 vs 固定K=1 SFTS + FACR | K1平均mAP略高且Rank-1三次一致领先；锁定K1 |
-| T11 / E027、E028 | K1 + FACR前置独立masked aggregation | seed 1111大幅提升，但seed 2222的mAP/Rank-1均略低于K1；不替换最终K1 |
-| T12 / E029、E030 | K1 + 训练期共享跨模态token重建 | 两个seed均同时超过配对K1；停止同数据集追加seed，转跨数据集 |
-| T12-R256 / E031 | 冻结T12迁移到256×128论文协议 | 先验证新输入与优化协议；不引入新结构 |
-
-TPM只作为TOP-ReID引用复现，不能改名冒充原创。FACR的实质差异是固定循环变为样本自适应全连接路由；FACSS连续分数、T10残差摘要和自细化均已被稳定性实验排除出最终主线。
-
-### 参考论文来源与创新边界
-
-当前结构是在`/Users/a123/Documents/reid/ReID相关论文`论文集中寻找解决方案后形成，来源必须按以下边界表述：
-
-- `Magic Tokens: Select Diverse Tokens for Multi-modal Object Re-Identification`（EDITOR）提供SFTS的空间/频率token选择、逐head Top-K、跨head/跨模态共享并集，以及HMA“独立聚合后再协同聚合”的层级顺序；项目保留其硬mask选择规则。T11明确借鉴HMA的独立聚合顺序，但只增加共享权重的模态内masked aggregation，后续协同阶段仍为项目FACR，并未复现完整HMA、BCC或OCFR；论文必须引用EDITOR，不能把独立聚合本身宣称为原创；
-- `TOP-ReID: Multi-spectral Object Re-Identification with Token Permutation`提供TPM的CLS读取其他模态patch并循环聚合的直接参考；T1是明确引用的模块复现，FACR则把固定循环改为同时读取两个来源并进行样本自适应路由。T12直接受TOP-ReID CRM的跨模态token重建监督启发，必须明确引用CRM；其工程差异是针对共享ViT使用单个共享、模态条件化的轻量预测器，每批只重建一个目标模态且不进入推理路径，不得将token重建思想宣称为原创；
-- `DeMo: Decoupled Feature-Based Mixture of Experts for Multi-Modal Object Re-Identification`中的ATMoE与FACR都包含按样本动态加权多模态信息的思想，可作为相关工作和概念对照；但现有代码及实验记录没有FACR直接复现或改造ATMoE的证据，不得把DeMo写成FACR的直接代码来源；
-- 公平性能比较口径已经固定：论文主结果定量表删除CLIP-based MambaPro、DeMo†及其指标，不把CLIP方法作为主要追赶对象；主要外部对照限于共享、ImageNet预训练的普通ViT方法。MambaPro与DeMo†只可在Related Work中简短说明方法脉络及预训练差异，不在正文定量主表展示性能数字；
-- T10新增的“将SFTS丢弃patch压缩为每模态一个注意力加权残差摘要，并在FACR后做受限自模态细化”不是上述论文的原有模块，但E024未复现精度优势，因此只能作为项目探索与信息保真消融，不能写成最终贡献。SFTS、TPM、交叉注意力、门控和动态加权本身均不得宣称为原创。
-
-## 三、当前方法定义
-
-### 1. TPM对照
-
-每个模态的CLS依次读取另外两个模态的完整patch tokens，最后读取自身patch tokens：
-
-- RGB CLS：NIR patches → TIR patches → RGB patches；
-- NIR CLS：TIR patches → RGB patches → NIR patches；
-- TIR CLS：RGB patches → NIR patches → TIR patches。
-
-每一步使用上一步更新后的CLS，三个最终CLS直接拼接并接受CE + Triplet监督。当前项目使用共享ViT，TOP-ReID原文使用三个独立ViT，因此T1是TPM模块对照，不是整套TOP-ReID复现。
-
-### 2. 修改后的FACSS
-
-FACSS保留旧Top-K二值mask接口，但T3主路径不在融合前删除token。它输出每个模态所有patch的连续重要性分数：
-
-`FACSS score = 模态内层级注意力 + α × 跨模态余弦一致性`
-
-- HS使用ViT第4、8、12层注意力形成层级候选；
-- 跨模态一致性为每个token在其他模态token中寻找高余弦匹配；
-- 连续分数用于FACR注意力偏置；
-- 二值mask仅保留用于旧路径和消融。
-
-T3设置`FACR_DETACH_SCORES=0`，使FACSS的α网络能从识别损失获得梯度；若detach且关闭旧0.15描述符分支，FACSS评分网络将无法训练。
-
-### 3. FACR
-
-FACR对每个目标模态执行：
-
-1. T11可选地让每个模态CLS先读取自身被共享mask选中的patch；冻结K1关闭该步骤；
-2. CLS分别对另外两个模态的完整patch tokens做交叉注意力；
-3. 可选的FACSS连续分数经过零初始化可学习增益形成有界soft attention bias；T10关闭该路径并使用SFTS共享mask；
-4. 样本自适应路由决定两个来源模态的相对权重；
-5. 可学习逐通道门控控制跨模态上下文注入量；
-6. 重复3轮后，可选最终自模态细化；T10只让目标CLS读取被SFTS丢弃patch的注意力加权摘要，不重复读取全量自身patch；
-7. 拼接RGB/NIR/TIR三个CLS，直接接受CE + Triplet监督。
-
-T2关闭FACSS分数，用于隔离路由本身；E008强对数偏置与E009有界偏置均未超过T2，评分引导已放弃。E020证明全量自身patch细化有害；E021的丢弃信息摘要单seed结果较好，但E024未复现并低于同seed T2/K1，因此该路径也已退出最终主线。
-
-### 4. T12训练期共享跨模态token重建
-
-T12保持K1的SFTS与FACR推理路径不变。训练时每个batch随机选择RGB/NIR/TIR中的一个目标模态，共享重建器只读取其他两个模态的完整patch tokens，结合源/目标模态embedding按对应patch位置预测目标tokens。目标tokens仅作为stop-gradient教师，损失为fp32归一化余弦距离；默认系数0.1，前5 epoch通过既有辅助损失warmup逐步加入。该头不参与识别特征生成，eval分支不调用，因此不增加推理计算。
-
-## 四、代码与验证状态
-
-- T12代码已提交并用于E029/E030正式训练，训练代码快照为`0daf4d2`；能力默认关闭，K1/T11配置与旧checkpoint结构不变。E020/E021训练时runner记录的HEAD仍为`7886101`，但其工作区快照与随后冻结的`bc4e0bb`一致。E006–E008训练代码快照为`1b2aa71`，E009训练代码快照为`e2af604`，E014训练代码快照为`df17584`，E015–E018训练代码快照为`2cc3438`。
-- 核心提交：`0089f1b`（TPM/FACR/FACSS接口）、`157a99c`（CUDA测试入口）、`1b2aa71`（E006–E008顺序runner）、`e2af604`（零初始化有界评分偏置及单实验runner）、`7886101`（可选FACR批级路由均衡损失与统计）、`bc4e0bb`（SFTS丢弃信息残差摘要与FACR最终自细化）、`32bbc7b`（融合runner显式seed覆盖）、`a78c007`（FACR前置独立masked aggregation与T11）、`0daf4d2`（训练期共享跨模态token重建与T12）。
-- 核心代码：`modeling/fusion_part/TPM.py`、`modeling/fusion_part/HS_FACSS.py`、`modeling/fusion_part/CrossModalReconstruction.py`、`modeling/make_model.py`。
-- 配置：`configs/RGBNT201/fusion/t1_tpm.yml`、`t2_adaptive_routing.yml`、`t3_m2_facr.yml`、`t7_sfts_fixed_k16_facr.yml`、`t8_sfts_fixed_k16_route_balance.yml`、`t9_facr_self_refine.yml`、`t10_sfts_k1_residual_facr.yml`、`t11_sfts_k1_independent_facr.yml`、`t12_sfts_k1_shared_token_recon.yml`。
-- T1–T12相关CPU前向、反向、mask不变性、T12目标隔离/stop-gradient/评估旁路与完整模型接线测试已通过；E029/E030均已在RTX 5090上完成20 epoch正式训练，无OOM、NaN或timeout。
-- 计算优化已经完成：HS rollout降阶、跨模态相似度复用、动态Top-K与频域mask批量化、训练同步/传输及AdamW参数组优化。
-- T8路由均衡能力已实现并保持默认关闭：`FACR_ROUTE_BALANCE_WEIGHT=0.0`不改变现有配置和checkpoint。E019以0.05正式训练后主指标退化，且路由诊断未发现明显塌缩，因此仅保留该能力用于诊断/消融，不进入最终模型。
-- T9/T10能力已实现且默认关闭：SFTS可输出每模态一个丢弃patch残差摘要，FACR可选最终自模态细化。T9全tokens自细化和T10残差摘要路径均已否定为最终精度方案，仅保留代码用于复现消融。
-- T12能力已实现且默认关闭：单个共享重建器每批随机选一个目标模态，目标tokens stop-gradient，仅其他两模态及重建头接受该辅助损失梯度；评估不调用重建头。
-- 新增`SOLVER.STRICT_DETERMINISM`开关（默认1）：为0时`train_net.py`不启用`use_deterministic_algorithms`并恢复cuDNN benchmark，其余固定种子采样机制不变；旧配置行为不变。归因链脚本为`tools/run_rgbnt201_determinism_chain.py`。
-- RGBNT201 paper候选配置当前使用256×128、Adam、50 epoch、10-epoch warm-up和完整cosine；E031/T12的batch 64配置与结果保留为阶段性参考。在模型定稿前不锁定未来消融的batch或运行M0/K1；最终消融必须在结构和协议冻结后统一batch、seed、epoch、优化器、输入尺寸与评估设置。ImageNet ViT backbone LR当前为2.8e-4，新模块LR为3.5e-4，weight decay为1e-4。ViT-B/16对应128个patch，固定K配置的`SFTS_RATIO`已同步按`K/128`换算；只保留水平翻转、padding/crop和random erasing，关闭灰度块替换与modality dropout。车辆数据配置未在本次迁移中改动。
-
-## 五、有效实验结果
-
-| 实验 | 配置 | mAP | Rank-1 | 判断 |
-|---|---|---:|---:|---|
-| E001 / M0 | 共享ViT基线 | 62.45 | 62.80 | 基线 |
-| E002 / M1 | M0 + HS | 62.73 | 63.64 | 小幅正增益 |
-| E003 / M2 | M1 + FACSS | 63.50 | 64.83 | M系列最好；相对M1 +0.77/+1.19 |
-| E004 / M3 | M2 + QAWF | 60.03 | 59.57 | 否定QAWF |
-| E005 / L1 | 旧A2质量感知频域组合 | 61.61 | 62.08 | 不并入主线 |
-| E006 / T1 | M0 + 纯TPM | 61.36 | 61.72 | 低于M0和M2，不支持直接采用纯TPM |
-| E007 / T2 | M0 + 自适应全连接路由 | 63.82 | 65.07 | 全tokens主线；相对T1 +2.46/+3.35，相对M2 +0.32/+0.24 |
-| E008 / T3 | HS/FACSS强对数评分 + FACR | 62.70 | 61.00 | 低于T2与M2；不保留强偏置实现 |
-| E009 / T3R | 零初始化有界FACSS评分 + FACR | 62.70 | 64.23 | Rank-1较E008恢复，但仍低于T2；放弃评分引导 |
-| E010 / T4 | FACSS固定Top-K=16硬选择 + FACR | 59.90 | 59.81 | 相对T2 -3.92/-5.26；否定融合前硬选择 |
-| E011 / T5 | EDITOR原始SFTS硬选择 + FACR | 62.37 | 63.04 | 性能开销仅约1.5%，但相对T2 -1.45/-2.03 |
-| E012 / T6 | 可学习K的SFTS + FACR | 60.04 | 60.17 | argmax K=4、最终保留27.10%；K搜索未充分收敛，不采用 |
-| E014 / T7-K16 | 固定K=16的SFTS + FACR | 63.80 | 65.07 | 固定K组最高mAP；与T2基本持平 |
-| E015 / K1 | 固定K=1的SFTS + FACR | 63.31 | 66.99 | seed 1111；与E023/E026组成最终三seed结果 |
-| E016 / K2 | 固定K=2的SFTS + FACR | 62.35 | 64.59 | 实际保留17.38% |
-| E017 / K4 | 固定K=4的SFTS + FACR | 62.83 | 64.71 | 实际保留26.71% |
-| E018 / K8 | 固定K=8的SFTS + FACR | 62.18 | 63.76 | 实际保留41.64%；本组最低mAP |
-| E019 / T8 | K=16 + FACR路由均衡损失 | 62.68 | 64.23 | 相对E014 -1.12/-0.84；否定该损失 |
-| E020 / T9 | T2 + FACR最终自身patch细化 | 62.33 | 61.12 | 相对T2 -1.49/-3.95；否定无条件自细化 |
-| E021 / T10 | K=1 + 丢弃信息残差摘要 + masked FACR自细化 | 63.88 | 66.27 | seed 1111探索结果；E024未复现，不采用 |
-| E022 / T2-S1 | T2额外seed 2222 | 64.41 | 66.15 | T2第二次结果；正常完成 |
-| E023 / K1-S1 | K1额外seed 2222 | 64.93 | 67.82 | 同seed最高mAP/Rank-1；实际保留11.63% |
-| E024 / T10-S1 | T10额外seed 2222 | 63.62 | 65.43 | 低于同seed T2/K1；否定最终候选 |
-| E025 / T2-S2 | T2额外seed 3333 | 63.31 | 64.95 | T2三seed基线组成 |
-| E026 / K1-S2 | K1额外seed 3333 | 63.87 | 66.75 | 同seed优于T2；锁定K1最终结构 |
-| E027 / T11 | K1 + FACR前置独立masked aggregation | 66.86 | 69.86 | seed 1111单次大幅提升；E028未复现 |
-| E028 / T11-S1 | T11额外seed 2222 | 64.76 | 67.46 | 较同seed E023/K1主指标-0.17/-0.36；停止追加seed |
-| E029 / T12 | K1 + 训练期共享跨模态token重建 | 65.82 | 67.58 | 相对同seed K1 +2.51/+0.59；进入seed 2222配对验证 |
-| E030 / T12-S1 | T12额外seed 2222 | 66.94 | 68.90 | 相对同seed K1 +2.01/+1.08；不再追加RGBNT201 seed |
-
-E001–E030均为RGBNT201、batch 40、20 epoch、主结果关闭re-ranking；E001–E021、E027及E029使用seed 1111，E022–E024、E028及E030使用seed 2222，E025–E026使用seed 3333。E031改为256×128、Adam、batch 64和50 epoch，是阶段性协议迁移结果；最终模型定稿前不补跑M0/K1。融合实验每个epoch验证，以便与已有最佳epoch选择协议一致。
-
-## 六、当前运行状态
-
-- 方案C确定性代价归因链已完成（训练commit `5087d9c`，三步均returncode 0，无OOM/NaN/timeout）：E039（宽松，62.11/65.19，486.0秒）相对严格E038仅+0.06，掉点归因于固定种子采样轨迹而非确定性算子；链脚本自动选定严格模式。E040（seed 2222，69.59/71.29，521.7秒，最佳epoch 4）与E041（seed 3333，63.51/64.83，515.5秒，最佳epoch 24）组成三seed严格基线：mAP 65.05±4.0、Rank-1 67.30±3.5（样本标准差）。结论：严格确定性口径下性能可恢复到接近旧水平，但三seed方差大、最佳epoch分布极不稳定（4/20/24），单次结果不得作为论文主表数字。链级汇总：`/root/autodl-tmp/outputs/HTL-ReID/E039-E041_chain.json`。
-- E038/T12-B64-DET25已正常完成：训练commit `46395b1`，returncode 0，耗时500.1秒；最佳epoch 20，62.05 mAP、65.79 Rank-1、77.63 Rank-5、82.06 Rank-10；确定性trace 25个epoch全部正常，无OOM、NaN或timeout。关键发现：同配置、同seed的修复前E036为66.49/68.06，确定化后主指标下降4.44/2.27，且逐epoch验证曲线波动加剧（45–62区间）。说明旧结果（含E031/E036）不能直接作为确定性口径下的性能参考；E038为确定性口径下首个可比基线。待决策：是否接受严格确定性的性能代价，还是恢复cuDNN benchmark等非严格设置换取性能（需用户决策）。
-- E037/DET-A/B已正常完成，严格确定性修复通过：训练commit `46395b1`；两次相同seed 1111、batch 64、2 epoch CUDA测试均returncode 0，耗时113.7/114.7秒，指标均为52.25 mAP、54.07 Rank-1、67.70 Rank-5、78.83 Rank-10。两个`determinism_trace.json`字节完全一致，SHA256均为`5bcc8c06dbaa32a40232e970f38eceb5cc66a507dab930161877d893790d3138`，采样顺序、完整重建目标、loss、accuracy和逐epoch指标均一致。全部测试在远端完成，无确定性算法报错、OOM或NaN；短测试不作为论文性能结果。
-- E036/T12-B64-REC25已正常完成：训练commit `33b006b`，returncode 0，耗时462.5秒；最佳epoch 24，66.49 mAP、68.06 Rank-1、83.85 Rank-5、88.88 Rank-10，未复现E031。E031/E036解析配置除输出目录与train50→25外完全一致，scheduler horizon均为50，训练代码无差异，但epoch 1曲线已经分叉；因此提前停止不是退化原因，当前同seed训练存在未受控非确定性。E031保留为最高单次结果，但在复现问题解决前不能视为稳定性能。
-- E035/T12-B128-LR2已正常完成：训练commit `1180596`，returncode 0，耗时447.0秒；最佳epoch 19，68.23 mAP、73.68 Rank-1、83.61 Rank-5、87.68 Rank-10。相对E034提高6.92/11.00/8.37/4.07个百分点，证明LR线性翻倍显著修复batch 128退化；相对E031仍低3.31 mAP和1.56 Rank-1，但墙钟缩短50.1%。epoch 25已从最佳点回落，因此无需恢复50 epoch；若继续优化，优先在5e-4至7e-4之间筛LR，或保持物理batch 128并恢复batch 64的Triplet难样本分组。
-- E034/T12-B128-R1已正常完成：训练commit `131d163`，returncode 0，耗时793.0秒；最佳epoch 4，61.31 mAP、62.68 Rank-1、75.24 Rank-5、83.61 Rank-10。相对E031只将batch 64改为128，墙钟缩短102.4秒（11.4%），但mAP/Rank-1下降10.23/12.56个百分点，未通过精度门槛；相对batch 96的E032仅快0.6秒。batch 128能够完成训练，但不能在E031原学习率与50-epoch日程下直接固定使用。
-- E033/T12-B128因启动脚本提前创建目标目录而触发runner防覆盖检查，模型未执行、GPU无训练占用、无checkpoint或指标；空目录与失败runner日志保留，实际训练转E034。
-- E032/T12-OPT1已正常完成：训练commit `cd693d1`，returncode 0，耗时793.6秒；最佳epoch 6，67.98 mAP、69.62 Rank-1、80.50 Rank-5、86.48 Rank-10。batch 96运行中显存快照为21,504/32,607 MiB，全程无OOM、NaN、超时或残留进程；结果、日志、配置快照、DONE和最佳checkpoint已保留。相对E031下降3.56 mAP和5.62 Rank-1，而耗时仅缩短101.8秒；由于batch和backbone LR同时变化，不作单因素归因，但不保留factor 0.2的低backbone LR组合。
-- E031/T12-R256已正常完成：训练代码commit `9082135`，returncode 0，耗时895.4秒；最佳epoch 17，71.54 mAP、75.24 Rank-1、83.85 Rank-5、86.72 Rank-10。50个epoch平均0.1996秒/batch，稳定训练快照显存15,600 MiB、GPU利用率92%–96%，无OOM、NaN、超时或残留进程；结果JSON、DONE、配置快照、日志、TensorBoard事件及约431 MB最佳checkpoint均已保留。E031作为batch 64的T12阶段性最好结果保留，不触发当前消融补跑。
-- E030/T12-S1已正常完成：commit `0daf4d2`，returncode 0，耗时758.0秒；最佳epoch 16，66.94 mAP、68.90 Rank-1、79.43 Rank-5、85.77 Rank-10。相对同seed E023/K1提升2.01/1.08/0.84/1.80，两个主指标均超过预设对照；结果JSON、DONE、日志、配置快照、TensorBoard事件和最佳checkpoint均已保留，训练进程已退出。基于时间成本，不再运行T12 seed 3333。
-- E029/T12已正常完成：commit `0daf4d2`，returncode 0，耗时757.7秒；最佳epoch 20，65.82 mAP、67.58 Rank-1、79.43 Rank-5、85.65 Rank-10。相对同seed E015/K1提升2.51/0.59/1.20/2.16，通过预设seed 2222晋级门槛；结果JSON、DONE、日志、配置快照、TensorBoard事件和最佳checkpoint均已保留，runner未生成预期的`retention.json`。
-- E028/T11-S1已正常完成：commit `a78c007`，returncode 0，耗时763.2秒；最佳epoch 17，64.76 mAP、67.46 Rank-1、81.46 Rank-5、86.36 Rank-10；实际保留11.6706%。较同seed E023/K1的mAP和Rank-1分别低0.17和0.36，未通过预设门槛，不运行seed 3333。
-- E027/T11已正常完成：commit `a78c007`，returncode 0，耗时771.7秒；最佳epoch 20，66.86 mAP、69.86 Rank-1、82.54 Rank-5、88.16 Rank-10；实际保留11.3782%。相对E015/K1同seed提高3.55/2.87/4.31/4.67，通过预设晋级门槛。
-
-- E006–E008批量实验已完成；E008最佳epoch 14，mAP 62.70%、Rank-1 61.00%、Rank-5 75.00%、Rank-10 81.46%。
-- E009/T3R已完成：807.5秒，最佳epoch 11，mAP 62.70%、Rank-1 64.23%、Rank-5 75.00%、Rank-10 80.50%。
-- E010/T4已完成：809.4秒，最佳epoch 11，mAP 59.90%、Rank-1 59.81%、Rank-5 71.53%、Rank-10 78.59%，代码commit `1d0a520`。
-- E010输出目录：`/root/autodl-tmp/outputs/HTL-ReID/E010_T4_facss_masked_facr_seed1111`；已生成`DONE`、结果JSON和最佳checkpoint。
-- E011/T5已完成：772.3秒，最佳epoch 18，mAP 62.37%、Rank-1 63.04%、Rank-5 76.08%、Rank-10 83.37%；平均0.2842秒/batch，相对T2仅增加约1.5%。
-- E012/T6已完成：792.8秒，最佳epoch 13，mAP 60.04%、Rank-1 60.17%、Rank-5 72.85%、Rank-10 80.50%；最佳checkpoint的argmax K=4，最终并集保留27.10%。
-- E013固定K代理筛选已完成：K=1/2/4/8/16的mAP依次为59.6751/59.8778/60.0353/60.0675/60.0716；结果差异很小，仅用于选择E014候选。
-- E014/T7固定K=16已完成：770.2秒，最佳epoch 16，mAP 63.80%、Rank-1 65.07%、Rank-5 75.96%、Rank-10 82.06%；输出目录`/root/autodl-tmp/outputs/HTL-ReID/E014_T7_sfts_fixed_k16_facr_seed1111`。
-- E015/K1已完成：818.1秒，最佳epoch 17，mAP 63.31%、Rank-1 66.99%，实际保留11.53%。
-- E016/K2已完成：801.5秒，最佳epoch 18，mAP 62.35%、Rank-1 64.59%，实际保留17.38%。
-- E017/K4已完成：788.6秒，最佳epoch 17，mAP 62.83%、Rank-1 64.71%，实际保留26.71%。
-- E018/K8已完成：769.5秒，最佳epoch 17，mAP 62.18%、Rank-1 63.76%，实际保留41.64%。
-- E019/T8已完成：769.7秒，最佳epoch 16，mAP 62.68%、Rank-1 64.23%、Rank-5 76.32%、Rank-10 82.66%；实际保留60.37%，路由无明显塌缩，否定路由均衡损失。
-- E020/T9已完成：733.8秒，最佳epoch 14，mAP 62.33%、Rank-1 61.12%；否定全tokens FACR后的无条件自模态细化。
-- E021/T10已完成：764.6秒，最佳epoch 17，mAP 63.88%、Rank-1 66.27%、Rank-5 77.03%、Rank-10 83.25%；实际保留11.44%，但额外seed未复现。
-- 共享ViT三模态批处理优化在服务器正式尺寸基准中为0.2680秒/step，慢于顺序版0.2573秒/step约4.2%，已通过commit `c8e7a71`回滚；fused AdamW相对foreach仅约0.4%差异，不采用。
-- seed 2222配对任务E022–E024均已正常完成，returncode均为0。
-- E022/T2：721.5秒，最佳epoch 17，64.41 mAP、66.15 Rank-1、79.78 Rank-5、85.65 Rank-10。
-- E023/K1：743.5秒，最佳epoch 10，64.93 mAP、67.82 Rank-1、78.59 Rank-5、83.97 Rank-10；实际保留11.6336%。
-- E024/T10：761.3秒，最佳epoch 17，63.62 mAP、65.43 Rank-1、75.96 Rank-5、81.82 Rank-10；实际保留11.6685%。
-- 批次日志：`/root/autodl-tmp/outputs/HTL-ReID/paired_seed2222_E022-E024.runner.log`；各实验的结果JSON、日志和最佳checkpoint均已保留，E023/E024的`retention.json`已补齐。
-- seed 3333第三组统计任务E025/E026已于2026-08-26 23:10 CST全部完成。
-- E025/T2已正常完成：722.3秒，最佳epoch 18，63.31 mAP、64.95 Rank-1、78.59 Rank-5、85.41 Rank-10。
-- E026/K1已正常完成：754.8秒，最佳epoch 15，63.87 mAP、66.75 Rank-1、79.31 Rank-5、85.41 Rank-10；实际保留11.5181%。
-- E025/E026 returncode均为0，原批次编排进程已退出。批次日志：`/root/autodl-tmp/outputs/HTL-ReID/paired_seed3333_E025-E026.runner.log`；结果JSON、最佳checkpoint及E026 `retention.json`均已保留。
-- 最终三seed统计：T2为63.847±0.550 mAP、65.390±0.661 Rank-1、78.627±1.135 Rank-5、85.010±0.909 Rank-10；K1为64.037±0.823、67.187±0.561、78.710±0.550、84.290±0.999。
-- T12前两个seed统计：66.380±0.792 mAP、68.240±0.933 Rank-1、79.430±0.000 Rank-5、85.710±0.085 Rank-10（样本标准差）；相对配对K1的两次mAP增益为+2.51/+2.01，Rank-1增益为+0.59/+1.08，方向一致。
-
-## 七、下一步
-
-1. 口径已定：保持严格确定性，三seed基线为E038/E040/E041（mAP 65.05±4.0、Rank-1 67.30±3.5）；旧非确定性结果（含E031）只作历史参考，论文主表一律使用多seed均值；
-2. 待决项：逐epoch曲线高震荡且最佳点选择敏感，优先候选是恢复50 epoch完整训练（在严格确定性下重跑三seed）或改进验证/最佳点选择策略；决策前不启动其他性能对比；
-3. 曲线问题处理完后，才继续比较batch 64/128或筛5e-4至7e-4学习率；
-4. 模型结构定稿后，冻结输入尺寸、batch、seed、epoch、优化器、学习率、数据增强和评估口径；若batch 128已验证通过，最终模型及内部消融也统一使用batch 128；
-5. 在完全一致的冻结协议下训练最终模型，再补齐K1和M0消融；若最终结构改变，同步重新定义与之配对的消融链；
-6. 消融完成后再做最终模型、K1和M0推理路径的参数量、GFLOPs、延迟和显存对比；K1 mask未物理压缩FACR输入，不声称等比例效率收益；
-7. RGBNT100和MSVR310待最终模型冻结后，按各自横纵比另行冻结配置，不能照搬RGBNT201尺寸；论文主表只使用最终冻结协议下可比的结果。
-
-可选性能上限方向（未实现、未授权运行）：256×128下T12对全部128个patch等权计算重建损失，背景区域仍可能稀释身份监督。如后续明确授权结构改进，唯一优先候选是使用`detach`后的SFTS共享mask加权逐token余弦重建损失；E031不引入该变化，以隔离结构因素。
-
-## 八、统一约束
-
-- 每个训练进程必须使用`timeout --signal=TERM --kill-after=10s 30m ...`；
-- RGBNT201 T2/K1三seed已使用1111、2222、3333完成，固定20 epoch、batch 40及相同预训练与优化协议；不得追加seed追逐结果；
-- 时间优先：新结构默认单seed筛选，只有结果明确且确有决策价值时才做一次配对复验；除非用户明确要求，不自动追加第三seed，优先把预算用于跨数据集验证和论文必需实验；
-- 主结果明确关闭re-ranking；
-- 正式或失败运行均登记独立E编号并保留配置、日志、结果JSON和最佳checkpoint；
-- 不删除远端训练产物，清理前必须先列出候选和大小并取得用户同意；
-- 不把引用模块通过小改名包装成原创，TPM必须明确引用TOP-ReID。
-
-## 九、新会话读取顺序
-
-1. 本文档；
-2. `/Users/a123/Documents/reid/HTL-ReID/实验记录.md`；
-3. `/Users/a123/Documents/reid/HTL-ReID/实验记录/E025_T2_RGBNT201_seed3333.md`、`E026_K1_RGBNT201_seed3333.md`及`实验记录.md`三seed汇总，再按需读取E007、E015、E022和E023；
-4. 如需代码细节，再读`HTL-ReID/modeling/fusion_part/SFTS.py`、`TPM.py`和`modeling/make_model.py`；
-5. 确认E029/E030训练代码快照为`0daf4d2`且输入为384×192；E027–E030均已完成，不得重复启动；
-6. 新RGBNT201正式运行必须读取E031文档并确认256×128、Adam/50 epoch协议、128 patches及固定K比例；T11稳定性验证已停止。
+1. 完成候选冻结决策后，确定最终模型结构，并冻结输入尺寸、batch、seed、epoch、优化器、学习率、数据增强、描述符权重、TTA和评估设置。
+2. 在冻结协议下训练最终模型及必要的K1、M0内部对照。
+3. 完成最终模型、K1和M0的参数量、GFLOPs、延迟及显存对比。
+4. 最终模型冻结后，分别为RGBNT100和MSVR310确定配置并完成验证。
+5. 模型、协议和实验口径全部冻结后，重建`论文大修执行方案.md`并开始论文正文及回复信修改。
