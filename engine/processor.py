@@ -55,6 +55,8 @@ def _stage_scale(epoch, warmup_epochs):
 def _pair_loss_weight(cfg, pair_idx, num_pairs):
     if pair_idx == 0:
         return float(cfg.MODEL.FUSE_LOSS_WEIGHT)
+    if cfg.MODEL.DECOUPLED_MOE and pair_idx == 1:
+        return float(cfg.MODEL.DECOUPLED_MOE_LOSS_WEIGHT)
     if cfg.MODEL.PART_BRANCH and pair_idx == num_pairs - 1:
         return float(cfg.MODEL.PART_LOSS_WEIGHT)
     return float(cfg.MODEL.BRANCH_LOSS_WEIGHT)

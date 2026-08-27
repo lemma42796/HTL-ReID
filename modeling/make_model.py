@@ -12,6 +12,7 @@ from modeling.fusion_part.AGF import AGF
 from modeling.fusion_part.TPM import TPM, FACR
 from modeling.fusion_part.CrossModalReconstruction import \
     SharedCrossModalTokenReconstruction
+from modeling.fusion_part.DecoupledMoEFusion import DecoupledMoEFusion
 
 
 def weights_init_kaiming(m):
@@ -293,6 +294,7 @@ class HTLReID(nn.Module):
             cfg.MODEL.CROSS_MODAL_RECON_LOSS_WEIGHT)
         self.hetero_triplet_weight = float(cfg.MODEL.HETERO_TRIPLET_WEIGHT)
         self.hetero_triplet_margin = float(cfg.MODEL.HETERO_TRIPLET_MARGIN)
+        self.use_decoupled_moe = bool(cfg.MODEL.DECOUPLED_MOE)
         self._last_facr_stats_epoch = None
         if sum((self.use_agf, self.use_tpm, self.use_facr)) > 1:
             raise ValueError('MODEL.AGF, MODEL.TPM, and MODEL.FACR are mutually exclusive')
@@ -322,6 +324,10 @@ class HTLReID(nn.Module):
             raise ValueError('HETERO_TRIPLET_WEIGHT must be non-negative')
         if self.hetero_triplet_margin < 0.0:
             raise ValueError('HETERO_TRIPLET_MARGIN must be non-negative')
+        self.decoupled_moe_loss_weight = float(
+            cfg.MODEL.DECOUPLED_MOE_LOSS_WEIGHT)
+        if self.decoupled_moe_loss_weight < 0.0:
+            raise ValueError('DECOUPLED_MOE_LOSS_WEIGHT must be non-negative')
         self.use_ocfr = bool(cfg.MODEL.OCFR)
         self.use_quality = bool(cfg.MODEL.QUALITY_AWARE)
         self.use_adapter = bool(cfg.MODEL.MODALITY_ADAPTER)
@@ -352,6 +358,14 @@ class HTLReID(nn.Module):
                 "TEST.ORIGINAL_CLS_FEAT must be 'off', 'concat', or 'only'")
         if self.test_original_cls_feat_weight < 0.0:
             raise ValueError('TEST.ORIGINAL_CLS_FEAT_WEIGHT must be non-negative')
+        self.test_decoupled_moe_feat = cfg.TEST.DECOUPLED_MOE_FEAT.lower()
+        self.test_decoupled_moe_feat_weight = float(
+            cfg.TEST.DECOUPLED_MOE_FEAT_WEIGHT)
+        if self.test_decoupled_moe_feat not in ('off', 'concat', 'only'):
+            raise ValueError(
+                "TEST.DECOUPLED_MOE_FEAT must be 'off', 'concat', or 'only'")
+        if self.test_decoupled_moe_feat_weight < 0.0:
+            raise ValueError('TEST.DECOUPLED_MOE_FEAT_WEIGHT must be non-negative')
 
         self.selected_patch_blend_weight = float(cfg.MODEL.SELECTED_PATCH_BLEND_WEIGHT)
         self.selected_patch_context = cfg.MODEL.SELECTED_PATCH_CONTEXT.lower()
@@ -412,6 +426,13 @@ class HTLReID(nn.Module):
                 smooth_l1_weight=(
                     cfg.MODEL.CROSS_MODAL_RECON_SMOOTH_L1_WEIGHT),
             )
+        if self.use_decoupled_moe:
+            self.DECOUPLED_MOE = DecoupledMoEFusion(
+                dim=self.BACKBONE.token_dim,
+                num_heads=cfg.MODEL.DECOUPLED_MOE_NUM_HEADS,
+                gate_heads=cfg.MODEL.DECOUPLED_MOE_GATE_HEADS,
+                dropout=cfg.MODEL.DECOUPLED_MOE_DROPOUT,
+            )
         if self.use_agf:
             self.AGF = AGF(dim=self.BACKBONE.token_dim,
                            num_heads=cfg.MODEL.AGF_NUM_HEADS,
@@ -465,6 +486,13 @@ class HTLReID(nn.Module):
         self.FUSE_HEAD = nn.Linear(self.fuse_dim, num_classes, bias=False)
         self.FUSE_BN = nn.BatchNorm1d(self.fuse_dim)
         self.FUSE_HEAD.apply(weights_init_classifier)
+
+        if self.use_decoupled_moe:
+            moe_dim = self.DECOUPLED_MOE.output_dim
+            self.DECOUPLED_MOE_BN = nn.BatchNorm1d(moe_dim)
+            self.DECOUPLED_MOE_HEAD = nn.Linear(
+                moe_dim, num_classes, bias=False)
+            self.DECOUPLED_MOE_HEAD.apply(weights_init_classifier)
 
         # The output learning params of RGB/NIR/TIR cls tokens
         self.BACKBONE_HEAD = nn.Linear(self.BACKBONE.token_dim, num_classes, bias=False)
@@ -767,16 +795,25 @@ class HTLReID(nn.Module):
         return self._stripe_part_feature(rgb_feat, nir_feat, tir_feat,
                                          quality_scores=quality_scores)
 
-    def _test_descriptor(self, cls4t, rgb_feat, nir_feat, tir_feat, quality_scores=None, masks=None):
+    def _test_descriptor(self, cls4t, rgb_feat, nir_feat, tir_feat,
+                         quality_scores=None, masks=None,
+                         decoupled_moe_feat=None):
         original_cls = torch.cat([
             rgb_feat[:, 0, :], nir_feat[:, 0, :], tir_feat[:, 0, :]
         ], dim=-1)
         if self.test_original_cls_feat == 'only':
             return original_cls
+        if self.test_decoupled_moe_feat == 'only':
+            if decoupled_moe_feat is None:
+                raise RuntimeError('decoupled MoE test feature requested but branch is disabled')
+            return decoupled_moe_feat
 
         use_part = self.test_part_feat != 'off' and self.use_part
         use_original = self.test_original_cls_feat == 'concat'
-        if not use_part and not use_original:
+        use_decoupled_moe = (
+            self.test_decoupled_moe_feat == 'concat' and
+            decoupled_moe_feat is not None)
+        if not use_part and not use_original and not use_decoupled_moe:
             return cls4t
 
         descriptors = [F.normalize(cls4t, dim=-1)]
@@ -784,6 +821,11 @@ class HTLReID(nn.Module):
             descriptors.append(
                 F.normalize(original_cls, dim=-1) *
                 self.test_original_cls_feat_weight)
+
+        if use_decoupled_moe:
+            descriptors.append(
+                F.normalize(decoupled_moe_feat, dim=-1) *
+                self.test_decoupled_moe_feat_weight)
 
         if use_part:
             part_feat = self._part_feature(
@@ -1008,24 +1050,34 @@ class HTLReID(nn.Module):
             self._log_facr_statistics(writer, epoch)
             score = self.FUSE_HEAD(self.FUSE_BN(cls4t))
             agf_aux_pairs = self._agf_aux_pairs()
+            if self.use_decoupled_moe:
+                decoupled_moe_feat = self.DECOUPLED_MOE(
+                    RGB_feat, NIR_feat, TIR_feat)
+                decoupled_moe_score = self.DECOUPLED_MOE_HEAD(
+                    self.DECOUPLED_MOE_BN(decoupled_moe_feat))
             if self.use_part:
                 part_feat = self._part_feature(RGB_feat_s, NIR_feat_s, TIR_feat_s, quality_scores, masks=mask)
                 part_score = self.PART_HEAD(self.PART_BN(part_feat))
             if self.AL:
+                output = [score, cls4t]
+                if self.use_decoupled_moe:
+                    output += [decoupled_moe_score, decoupled_moe_feat]
+                output += agf_aux_pairs + [ori_score, ori]
                 if self.use_part:
-                    return tuple([score, cls4t] + agf_aux_pairs +
-                                 [ori_score, ori, part_score, part_feat, loss_aux])
-                return tuple([score, cls4t] + agf_aux_pairs +
-                             [ori_score, ori, loss_aux])
+                    output += [part_score, part_feat]
+                output += [loss_aux]
+                return tuple(output)
             else:
+                output = [score, cls4t]
+                if self.use_decoupled_moe:
+                    output += [decoupled_moe_score, decoupled_moe_feat]
+                output += agf_aux_pairs + [
+                    RGB_cls_score, RGB_cls4tri, NIR_cls_score,
+                    NIR_cls4tri, TIR_cls_score, TIR_cls4tri]
                 if self.use_part:
-                    return tuple([score, cls4t] + agf_aux_pairs +
-                                 [RGB_cls_score, RGB_cls4tri, NIR_cls_score,
-                                  NIR_cls4tri, TIR_cls_score, TIR_cls4tri,
-                                  part_score, part_feat, loss_aux])
-                return tuple([score, cls4t] + agf_aux_pairs +
-                             [RGB_cls_score, RGB_cls4tri, NIR_cls_score,
-                              NIR_cls4tri, TIR_cls_score, TIR_cls4tri, loss_aux])
+                    output += [part_score, part_feat]
+                output += [loss_aux]
+                return tuple(output)
         else:
             RGB = x['RGB']
             NIR = x['NI']
@@ -1067,8 +1119,13 @@ class HTLReID(nn.Module):
                 quality_scores=quality_scores, masks=mask,
                 facss_scores=facss_scores, facr_masks=facss_gates,
                 facr_residual_tokens=facr_residual_tokens)
+            decoupled_moe_feat = None
+            if self.use_decoupled_moe:
+                decoupled_moe_feat = self.DECOUPLED_MOE(
+                    RGB_feat, NIR_feat, TIR_feat)
             return self._test_descriptor(cls4t, RGB_feat_s, NIR_feat_s, TIR_feat_s,
-                                         quality_scores, masks=mask)
+                                         quality_scores, masks=mask,
+                                         decoupled_moe_feat=decoupled_moe_feat)
 
     def forward_two_modalities(self, x, cam_label=None, label=None, view_label=None, cross_type=None, img_path=None,
                                mode=1,

@@ -21,7 +21,10 @@ def make_optimizer(cfg, model, center_criterion):
             continue
         lr = cfg.SOLVER.BASE_LR
         weight_decay = cfg.SOLVER.WEIGHT_DECAY
-        if key.startswith("BACKBONE."):
+        if key.startswith("DECOUPLED_MOE"):
+            lr = (cfg.SOLVER.BASE_LR *
+                  cfg.SOLVER.DECOUPLED_MOE_LR_FACTOR)
+        elif key.startswith("BACKBONE."):
             lr = cfg.SOLVER.BASE_LR * cfg.SOLVER.BACKBONE_LR_FACTOR
         elif _is_new_module(key):
             lr = cfg.SOLVER.BASE_LR * cfg.SOLVER.NEW_MODULE_LR_FACTOR

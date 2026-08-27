@@ -135,6 +135,13 @@ _C.MODEL.CROSS_MODAL_RECON_SMOOTH_L1_WEIGHT = 0.0
 # Supervised batch-hard metric loss across different modality CLS features.
 _C.MODEL.HETERO_TRIPLET_WEIGHT = 0.0
 _C.MODEL.HETERO_TRIPLET_MARGIN = 0.3
+# DeMo-inspired heterogeneous feature decomposition: three modality-specific,
+# three pairwise-shared, and one all-modality route with dynamic expert gating.
+_C.MODEL.DECOUPLED_MOE = 0
+_C.MODEL.DECOUPLED_MOE_NUM_HEADS = 12
+_C.MODEL.DECOUPLED_MOE_GATE_HEADS = 4
+_C.MODEL.DECOUPLED_MOE_DROPOUT = 0.1
+_C.MODEL.DECOUPLED_MOE_LOSS_WEIGHT = 1.0
 # OCFR auxiliary loss (not in paper); off by default for paper-faithful reproduction
 _C.MODEL.OCFR = 0
 # Ablation switches (1=enable, 0=disable)
@@ -250,6 +257,7 @@ _C.SOLVER.TRAIN_EPOCHS = 0
 _C.SOLVER.BASE_LR = 0.0001
 _C.SOLVER.BACKBONE_LR_FACTOR = 0.1
 _C.SOLVER.NEW_MODULE_LR_FACTOR = 1.0
+_C.SOLVER.DECOUPLED_MOE_LR_FACTOR = 1.0
 # Factor of learning bias
 _C.SOLVER.LARGE_FC_LR = False
 _C.SOLVER.BIAS_LR_FACTOR = 2
@@ -335,6 +343,8 @@ _C.TEST.PART_FEAT = 'off'
 _C.TEST.PART_FEAT_WEIGHT = 0.3
 _C.TEST.ORIGINAL_CLS_FEAT = 'off'
 _C.TEST.ORIGINAL_CLS_FEAT_WEIGHT = 0.5
+_C.TEST.DECOUPLED_MOE_FEAT = 'off'
+_C.TEST.DECOUPLED_MOE_FEAT_WEIGHT = 0.5
 # ----------------------------------------------------------a------------------ #
 # Misc options
 # ---------------------------------------------------------------------------- #
