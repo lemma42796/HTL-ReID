@@ -1,7 +1,8 @@
 # E032｜RGBNT201 T12 backbone低学习率 + batch 96筛选
 
-- 状态：待启动
+- 状态：运行中
 - 登记时间：2026-08-27 16:48 CST
+- 开始时间：2026-08-27 16:51 CST
 - 对应实验：T12-OPT1
 - 实验目的：在赶时间的batch 96筛选协议下，检验将预训练ViT backbone学习率因子从0.8降至0.2能否减少E031在epoch 17后的指标回落。
 - 变化与限制：T12结构、新模块学习率、损失、输入和评估不变；相对E031同时将batch从64改为96、backbone LR factor从0.8改为0.2，因此本次只是快速性能筛选，不能对两个因素分别作因果归因。
@@ -13,10 +14,13 @@
 - Scheduler / warm-up：50 epoch cosine；前10 epoch从0.1倍LR线性warm-up；按epoch更新。
 - 模型：共享ViT-B/16；固定K=1 SFTS共享mask；三轮FACR；训练期共享跨模态token重建，hidden dim 256、损失系数0.1、前5 epoch auxiliary warm-up。
 - 预训练权重：`/root/autodl-tmp/pretrained/vit_base_patch16_224_augreg2_in21k_ft_in1k.pth`
+- 训练代码commit：`cd693d1`
 - 计划命令：`/root/miniconda3/bin/python tools/run_rgbnt201_fusion.py --single-experiment E032 --single-row T12-OPT1 --single-config configs/RGBNT201/fusion/t12_sfts_k1_shared_token_recon_bb02.yml --single-output-name E032_T12_opt_bb02_batch96_seed1111 --seed 1111`；runner内部强制`timeout --signal=TERM --kill-after=10s 30m`。
 - 输出目录：`/root/autodl-tmp/outputs/HTL-ReID/E032_T12_opt_bb02_batch96_seed1111`
 - Runner日志：`/root/autodl-tmp/outputs/HTL-ReID/E032_T12_opt_bb02_batch96_seed1111.runner.log`
+- Runner PID：1648；GNU timeout PID：1650；训练主进程PID：1651。
 - 预期产物：`resolved_config.yml`、`commit.txt`、`command.txt`、`stdout.log`、`train_log.txt`、`run_result.json`、`DONE/FAILED`标记、TensorBoard事件和最佳checkpoint。
 - 墙钟上限：30分钟。
 - 判断口径：首先检查batch 96是否在32 GB RTX 5090上无OOM/NaN并缩短耗时；精度与E031的71.54 mAP / 75.24 Rank-1作粗略筛选比较，但不声称单变量改进。
+- 启动检查：远端为RTX 5090 32 GB，无其他训练进程；数据集、预训练权重和目标路径正常。resolved config确认batch 96、Adam、50 epoch、backbone LR factor 0.2、re-ranking关闭；epoch 1以0.371秒/batch完成，GPU利用率99%，无OOM、NaN或配置错误。进程列表中其余同命令PID为14个DataLoader worker，不是重复训练。
 - 结果与结论：待运行。
