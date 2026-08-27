@@ -36,6 +36,7 @@ DEFAULT_SEED = 1111
 BATCH_SIZE = 96
 EVAL_PERIOD = 1
 INPUT_SIZE = (256, 128)
+SUPPORTED_BACKBONE_LR_FACTORS = (0.2, 0.8)
 
 EPOCH_PATTERN = re.compile(r"Validation Results - Epoch:\s+(\d+)")
 MAP_PATTERN = re.compile(r"mAP:\s+([0-9.]+)%")
@@ -67,10 +68,12 @@ def resolve_config(row_config, output_dir, seed=DEFAULT_SEED):
         raise ValueError("all RGBNT201 paper rows must use Adam")
     if abs(float(cfg.SOLVER.BASE_LR) - 3.5e-4) > 1e-12:
         raise ValueError("all RGBNT201 paper rows must use base LR 3.5e-4")
-    backbone_lr = float(cfg.SOLVER.BASE_LR) * float(
-        cfg.SOLVER.BACKBONE_LR_FACTOR)
-    if abs(backbone_lr - 2.8e-4) > 1e-12:
-        raise ValueError("all RGBNT201 paper rows must use backbone LR 2.8e-4")
+    backbone_lr_factor = float(cfg.SOLVER.BACKBONE_LR_FACTOR)
+    if not any(abs(backbone_lr_factor - value) <= 1e-12
+               for value in SUPPORTED_BACKBONE_LR_FACTORS):
+        raise ValueError(
+            "RGBNT201 runner supports backbone LR factors {}, got {}".format(
+                SUPPORTED_BACKBONE_LR_FACTORS, backbone_lr_factor))
     if abs(float(cfg.SOLVER.WARMUP_FACTOR) - 0.1) > 1e-12:
         raise ValueError("all RGBNT201 paper rows must warm up from 0.1x LR")
     if int(cfg.SOLVER.WARMUP_ITERS) != 10:
@@ -211,7 +214,7 @@ def main():
     plan = []
     for experiment, row, row_config in rows:
         output_dir = args.output_root / output_names[row]
-        resolve_config(row_config, output_dir, seed=args.seed)
+        resolved_cfg = resolve_config(row_config, output_dir, seed=args.seed)
         plan.append({
             "experiment": experiment,
             "row": row,
@@ -223,6 +226,12 @@ def main():
             "batch_size": BATCH_SIZE,
             "input_size": list(INPUT_SIZE),
             "epochs": TRAIN_EPOCHS,
+            "optimizer": resolved_cfg.SOLVER.OPTIMIZER_NAME,
+            "base_lr": float(resolved_cfg.SOLVER.BASE_LR),
+            "backbone_lr_factor": float(
+                resolved_cfg.SOLVER.BACKBONE_LR_FACTOR),
+            "backbone_lr": float(resolved_cfg.SOLVER.BASE_LR) * float(
+                resolved_cfg.SOLVER.BACKBONE_LR_FACTOR),
             "eval_period": EVAL_PERIOD,
             "re_ranking": "no",
             "time_limit_per_row": TIME_LIMIT,
