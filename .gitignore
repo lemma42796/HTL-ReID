@@ -1,8 +1,67 @@
-# Local/private handoff and evidence docs
-HANDOFF.md
-notes/实验排障与证据备查.md
-notes/实验配置备查表.md
+# ---------- Local logs and runtime artifacts ----------
+logs/
+*.log
+nohup.out
+*.pid
 
-# Local experiment logs and OS metadata
-local_logs/
+# ---------- Training outputs / checkpoints / datasets ----------
+outputs/
+output/
+checkpoints/
+ckpt/
+*.pth
+*.pt
+*.onnx
+/datasets/
+wandb/
+runs/
+tb_logs/
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+pip-wheel-metadata/
+.installed.cfg
+*.manifest
+*.spec
+
+# ---------- Virtual environments ----------
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ---------- Tooling caches ----------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.cache/
+.ipynb_checkpoints/
+
+# ---------- IDE / editor ----------
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+
+# ---------- OS metadata ----------
 .DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
