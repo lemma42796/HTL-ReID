@@ -1,9 +1,8 @@
 """Lightweight seven-route decoupled mixture-of-experts fusion.
 
-The route definition follows DeMo's heterogeneous decomposition idea: three
-modality-specific routes, three pairwise-shared routes, and one route shared by
-all modalities.  This implementation is native to HTL-ReID and keeps the
-existing shared ImageNet ViT backbone and ACI descriptor intact.
+The module uses three modality-specific routes, three pairwise-shared routes,
+and one route shared by all modalities while keeping the existing shared
+ImageNet ViT backbone and ACI descriptor intact.
 """
 
 import math

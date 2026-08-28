@@ -2,10 +2,8 @@
 
 Rolls out ViT attention across layers (A_L @ ... @ A_1), keeps the per-head
 top-K patches, and unites the masks across heads and modalities. The optional
-frequency mask from Frequency-based Token Selection is merged into the same
-shared union. The selection rule itself follows the official EDITOR source,
-with visualization-only code and CUDA hard-coding removed so it can run on any
-device. BCC and OCFR are intentionally not part of this module.
+frequency mask is merged into the same shared union. BCC and OCFR are
+intentionally not part of this module.
 """
 
 import torch
@@ -27,9 +25,9 @@ class PartAttention(nn.Module):
         if not attn_list:
             raise ValueError("HS requires a non-empty backbone attention list")
 
-        # EDITOR forms A_L @ ... @ A_1 and consumes only its CLS row. Propagate
-        # that row backwards through the same matrices instead of materializing
-        # every full M x M product. This is mathematically identical while
+        # Propagate the CLS row backwards through the attention matrices instead
+        # of materializing every full M x M product. This is mathematically
+        # identical while
         # reducing rollout complexity from O(M^3) to O(M^2). Selection ends in
         # hard top-k indices, so constructing an autograd graph here cannot
         # provide a gradient and only retains large intermediate tensors.

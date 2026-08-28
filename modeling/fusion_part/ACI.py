@@ -1,9 +1,8 @@
 """Cross-modal token fusion modules.
 
-``ACI`` (Adaptive Cross-modal Interaction) is the project extension of
-TOP-ReID's fixed cyclic Token Permutation Module: every target modality's
-class token adaptively aggregates evidence from the complete patch sequences
-of the other modalities, with sample-conditioned routing weights and gates.
+``ACI`` (Adaptive Cross-modal Interaction) lets every target modality's class
+token adaptively aggregate evidence from the complete patch sequences of the
+other modalities, with sample-conditioned routing weights and gates.
 """
 
 import torch
@@ -273,9 +272,9 @@ class FinalSelfRefinement(nn.Module):
 class ACI(nn.Module):
     """Adaptive Cross-modal Interaction.
 
-    Unlike the fixed-cycle TOP-ReID TPM it replaces, every target modality
-    reads both other modalities. Continuous selector scores can bias patch
-    attention, while a learned route and per-channel residual gate control
+    Every target modality reads both other modalities. Continuous selector
+    scores can bias patch attention, while a learned route and per-channel
+    residual gate control
     source and injection strength per sample. An optional independent
     pre-stage first lets each class token read its own masked patches before
     collaborative interaction. An optional final refinement lets each routed
