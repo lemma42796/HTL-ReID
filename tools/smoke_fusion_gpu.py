@@ -26,6 +26,7 @@ ROWS = (
     'configs/RGBNT201/fusion/t8_sfts_fixed_k16_route_balance.yml',
     'configs/RGBNT201/fusion/t9_facr_self_refine.yml',
     'configs/RGBNT201/fusion/t10_sfts_k1_residual_facr.yml',
+    'configs/RGBNT201/ablations/t14_chain/a2_facr_residual.yml',
 )
 
 

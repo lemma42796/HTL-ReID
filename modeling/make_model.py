@@ -285,6 +285,10 @@ class HTLReID(nn.Module):
         self.use_facr = bool(cfg.MODEL.FACR)
         self.facr_use_scores = bool(cfg.MODEL.FACR_USE_SCORES)
         self.facr_use_masks = bool(cfg.MODEL.FACR_USE_MASKS)
+        self.facr_residual_fusion = bool(
+            cfg.MODEL.FACR_RESIDUAL_FUSION)
+        self.facr_residual_scale_init = float(
+            cfg.MODEL.FACR_RESIDUAL_SCALE_INIT)
         self.facr_independent_aggregation = bool(
             cfg.MODEL.FACR_INDEPENDENT_AGG)
         self.facr_self_refine = bool(cfg.MODEL.FACR_SELF_REFINE)
@@ -303,6 +307,12 @@ class HTLReID(nn.Module):
         if self.use_facr and self.facr_use_masks and not (
                 bool(cfg.MODEL.FACSS_ENABLED) or self.use_sfts):
             raise ValueError('FACR_USE_MASKS requires FACSS or SFTS')
+        if self.facr_residual_fusion and not self.use_facr:
+            raise ValueError('FACR_RESIDUAL_FUSION requires FACR')
+        if self.facr_residual_fusion and not (
+                0.0 < self.facr_residual_scale_init < 1.0):
+            raise ValueError(
+                'FACR_RESIDUAL_SCALE_INIT must be strictly between 0 and 1')
         if self.facr_self_refine and not self.use_facr:
             raise ValueError('FACR_SELF_REFINE requires FACR')
         if self.facr_independent_aggregation and not self.use_facr:
@@ -417,6 +427,11 @@ class HTLReID(nn.Module):
                 self_refine_scale_init=cfg.MODEL.FACR_SELF_REFINE_SCALE_INIT,
                 independent_aggregation=self.facr_independent_aggregation,
             )
+            if self.facr_residual_fusion:
+                initial_scale = torch.tensor(
+                    self.facr_residual_scale_init, dtype=torch.float32)
+                self.FACR_RESIDUAL_LOGIT = nn.Parameter(
+                    torch.logit(initial_scale))
         if self.use_cross_modal_recon:
             self.CROSS_MODAL_RECON = SharedCrossModalTokenReconstruction(
                 dim=self.BACKBONE.token_dim,
@@ -644,10 +659,22 @@ class HTLReID(nn.Module):
         if self.use_facr:
             scores = facss_scores if self.facr_use_scores else None
             facr_masks = facr_masks if self.facr_use_masks else None
-            return self.FACR(
+            routed_cls = self.FACR(
                 rgb_full, nir_full, tir_full,
                 scores=scores, masks=facr_masks,
                 residual_tokens=facr_residual_tokens)
+            if not self.facr_residual_fusion:
+                return routed_cls
+            selector_cls = self._concat_cls(
+                rgb_sel, nir_sel, tir_sel,
+                quality_scores=quality_scores, masks=masks)
+            original_cls = torch.cat([
+                rgb_full[:, 0, :], nir_full[:, 0, :], tir_full[:, 0, :]
+            ], dim=-1)
+            residual_scale = torch.sigmoid(
+                self.FACR_RESIDUAL_LOGIT).to(dtype=routed_cls.dtype)
+            return selector_cls + residual_scale * (
+                routed_cls - original_cls)
         if self.use_agf:
             return self._agf_cls(
                 rgb_sel, nir_sel, tir_sel, quality_scores, masks=masks)
@@ -684,6 +711,10 @@ class HTLReID(nn.Module):
             return
         for name, value in self.FACR.route_statistics().items():
             writer.add_scalar('FACR/{}'.format(name), value.item(), epoch)
+        if self.facr_residual_fusion:
+            writer.add_scalar(
+                'FACR/residual_scale',
+                torch.sigmoid(self.FACR_RESIDUAL_LOGIT).item(), epoch)
         self._last_facr_stats_epoch = int(epoch)
 
     def _agf_aux_pairs(self):

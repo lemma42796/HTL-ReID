@@ -114,6 +114,11 @@ _C.MODEL.FACR_SCORE_BIAS_SCALE = 0.25
 _C.MODEL.FACR_SCORE_FLOOR = 0.05
 _C.MODEL.FACR_DETACH_SCORES = 1
 _C.MODEL.FACR_GATE_INIT_BIAS = 0.0
+# Preserve the selector descriptor and add only FACR's routed delta. Existing
+# experiments keep the historical replacement behavior unless explicitly
+# enabled by a row config.
+_C.MODEL.FACR_RESIDUAL_FUSION = 0
+_C.MODEL.FACR_RESIDUAL_SCALE_INIT = 0.1
 # Optional own-modality masked aggregation before collaborative FACR stages.
 # This follows the independent-before-collaborative ordering investigated by
 # T11 while leaving every existing FACR configuration unchanged by default.
