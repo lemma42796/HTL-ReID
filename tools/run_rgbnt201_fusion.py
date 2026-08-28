@@ -24,12 +24,12 @@ BASE_CONFIG = "configs/RGBNT201/paper/base.yml"
 ROWS = (
     ("E006", "T1", "configs/RGBNT201/fusion/t1_tpm.yml"),
     ("E007", "T2", "configs/RGBNT201/fusion/t2_adaptive_routing.yml"),
-    ("E008", "T3", "configs/RGBNT201/fusion/t3_m2_facr.yml"),
+    ("E008", "T3", "configs/RGBNT201/fusion/t3_m2_aci.yml"),
 )
 OUTPUT_NAMES = {
     "T1": "E006_T1_tpm_seed1111",
     "T2": "E007_T2_adaptive_routing_seed1111",
-    "T3": "E008_T3_m2_facr_seed1111",
+    "T3": "E008_T3_m2_aci_seed1111",
 }
 TIME_LIMIT = "30m"
 TRAIN_EPOCHS = 50

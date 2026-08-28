@@ -1,4 +1,4 @@
-"""Short CUDA-only forward/backward smoke test for TPM/FACR configs."""
+"""Short CUDA-only forward/backward smoke test for TPM/ACI configs."""
 
 import argparse
 from pathlib import Path
@@ -18,16 +18,16 @@ BASE = 'configs/RGBNT201/paper/base.yml'
 ROWS = (
     'configs/RGBNT201/fusion/t1_tpm.yml',
     'configs/RGBNT201/fusion/t2_adaptive_routing.yml',
-    'configs/RGBNT201/fusion/t3_m2_facr.yml',
-    'configs/RGBNT201/fusion/t4_facss_masked_facr.yml',
-    'configs/RGBNT201/fusion/t5_sfts_masked_facr.yml',
-    'configs/RGBNT201/fusion/t6_sfts_learnable_k_facr.yml',
-    'configs/RGBNT201/fusion/t7_sfts_fixed_k16_facr.yml',
+    'configs/RGBNT201/fusion/t3_m2_aci.yml',
+    'configs/RGBNT201/fusion/t4_facss_masked_aci.yml',
+    'configs/RGBNT201/fusion/t5_sfts_masked_aci.yml',
+    'configs/RGBNT201/fusion/t6_sfts_learnable_k_aci.yml',
+    'configs/RGBNT201/fusion/t7_sfts_fixed_k16_aci.yml',
     'configs/RGBNT201/fusion/t8_sfts_fixed_k16_route_balance.yml',
-    'configs/RGBNT201/fusion/t9_facr_self_refine.yml',
-    'configs/RGBNT201/fusion/t10_sfts_k1_residual_facr.yml',
-    'configs/RGBNT201/ablations/t14_chain/a2_facr_residual.yml',
-    'configs/RGBNT201/ablations/t14_chain/a2_facr_isolated.yml',
+    'configs/RGBNT201/fusion/t9_aci_self_refine.yml',
+    'configs/RGBNT201/fusion/t10_sfts_k1_residual_aci.yml',
+    'configs/RGBNT201/ablations/t14_chain/a2_aci_residual.yml',
+    'configs/RGBNT201/ablations/t14_chain/a2_aci_isolated.yml',
 )
 
 
@@ -52,7 +52,7 @@ def dummy_batch(batch, height, width, device):
 def smoke(row, batch, height, width):
     cfg = build_cfg(row, height, width)
     reference_heads = None
-    if cfg.MODEL.FACR_ISOLATED_BRANCH:
+    if cfg.MODEL.ACI_ISOLATED_BRANCH:
         torch.manual_seed(1701)
         reference_cfg = build_cfg(
             'configs/RGBNT201/ablations/t14_chain/a1_sfts.yml',
@@ -74,11 +74,11 @@ def smoke(row, batch, height, width):
     inputs = dummy_batch(batch, height, width, torch.device('cuda'))
     labels = torch.randint(0, 8, (batch,), device='cuda')
     output = model(inputs, label=labels, epoch=0)
-    expected_outputs = 7 if cfg.MODEL.FACR_ISOLATED_BRANCH else 5
+    expected_outputs = 7 if cfg.MODEL.ACI_ISOLATED_BRANCH else 5
     if len(output) != expected_outputs:
         raise AssertionError('{} returned {} values, expected {}'.format(
             row, len(output), expected_outputs))
-    if cfg.MODEL.FACR_ISOLATED_BRANCH:
+    if cfg.MODEL.ACI_ISOLATED_BRANCH:
         isolated_loss = output[2].float().mean() + output[3].float().mean()
         isolated_loss.backward(retain_graph=True)
         backbone_grads = [
@@ -87,7 +87,7 @@ def smoke(row, batch, height, width):
         ]
         if any(gradient is not None for gradient in backbone_grads):
             raise AssertionError(
-                '{} isolated FACR loss reached the backbone'.format(row))
+                '{} isolated ACI loss reached the backbone'.format(row))
         model.zero_grad(set_to_none=True)
     loss = sum(value.float().mean() for value in output[:-1]) + output[-1].float()
     loss.backward()
@@ -95,7 +95,7 @@ def smoke(row, batch, height, width):
         raise AssertionError('{} produced NaN/Inf'.format(row))
     fusion_parameters = [
         parameter for name, parameter in model.named_parameters()
-        if 'FACR' in name and parameter.requires_grad
+        if 'ACI' in name and parameter.requires_grad
     ]
     if not fusion_parameters or not all(parameter.grad is not None for parameter in fusion_parameters):
         raise AssertionError('{} fusion parameters did not all receive gradients'.format(row))
@@ -109,7 +109,7 @@ def smoke(row, batch, height, width):
     with torch.no_grad():
         descriptor = model(inputs, epoch=0)
     expected = 3 * model.BACKBONE.token_dim
-    if cfg.TEST.FACR_ISOLATED_FEAT == 'concat':
+    if cfg.TEST.ACI_ISOLATED_FEAT == 'concat':
         expected *= 2
     if descriptor.shape != (batch, expected):
         raise AssertionError('{} descriptor shape {}'.format(row, descriptor.shape))

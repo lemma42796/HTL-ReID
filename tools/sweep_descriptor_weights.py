@@ -26,7 +26,7 @@ from modeling import make_model
 from utils.metrics import eval_func
 
 
-COMPONENT_NAMES = ('facr', 'original', 'part', 'moe')
+COMPONENT_NAMES = ('aci', 'original', 'part', 'moe')
 
 
 def set_seed(seed):
@@ -120,7 +120,7 @@ def evaluate_grid(distances, pids, camids, num_query, weight_grid,
     for original_weight, part_weight, moe_weight in itertools.product(
             weight_grid['original'], weight_grid['part'], weight_grid['moe']):
         weights = {
-            'facr': 1.0,
+            'aci': 1.0,
             'original': float(original_weight),
             'part': float(part_weight),
             'moe': float(moe_weight),
@@ -196,7 +196,7 @@ def main():
 
     original, flipped, pids, camids = extract_components(
         model, val_loader, use_flip=args.tta_flip)
-    if len(pids) != original['facr'].size(0):
+    if len(pids) != original['aci'].size(0):
         raise RuntimeError('feature and label counts differ')
     del model
     torch.cuda.empty_cache()

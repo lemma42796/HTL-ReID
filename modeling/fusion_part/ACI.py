@@ -1,9 +1,9 @@
 """Cross-modal token fusion modules.
 
-``FACR`` (FACSS-guided Adaptive Cross-modal Routing) is the project
-extension of TOP-ReID's fixed cyclic Token Permutation Module: it replaces the
-fixed cyclic source assignment with sample-adaptive routing and uses the
-class-token query over the complete patch sequences of the other modalities.
+``ACI`` (Adaptive Cross-modal Interaction) is the project extension of
+TOP-ReID's fixed cyclic Token Permutation Module: every target modality's
+class token adaptively aggregates evidence from the complete patch sequences
+of the other modalities, with sample-conditioned routing weights and gates.
 """
 
 import torch
@@ -30,9 +30,9 @@ class ScoreBiasedCrossAttention(nn.Module):
         self.score_floor = float(score_floor)
         if not 0.0 <= self.score_floor < 1.0:
             raise ValueError('score_floor must be in [0, 1)')
-        # Start exactly from score-free FACR (T2). The bounded gain can only
-        # introduce FACSS guidance gradually when the identification objective
-        # finds it useful.
+        # Start exactly from score-free interaction (T2). The bounded gain can
+        # only introduce selector guidance gradually when the identification
+        # objective finds it useful.
         self.score_bias_gain = nn.Parameter(
             torch.zeros(()), requires_grad=self.score_bias_scale != 0.0)
         self.detach_scores = bool(detach_scores)
@@ -66,14 +66,14 @@ class ScoreBiasedCrossAttention(nn.Module):
         attention_gate = None
         if mask is not None:
             if mask.shape != (batch, tokens):
-                raise ValueError('FACSS mask shape must match source patches')
+                raise ValueError('selection mask shape must match source patches')
             attention_gate = mask.to(device=logits.device, dtype=logits.dtype)
             if not attention_gate.detach().bool().any(dim=1).all():
-                raise ValueError('FACSS mask must retain at least one source patch')
+                raise ValueError('selection mask must retain at least one source patch')
 
         if scores is not None and self.score_bias_scale != 0.0:
             if scores.shape != (batch, tokens):
-                raise ValueError('FACSS score shape must match source patches')
+                raise ValueError('selection score shape must match source patches')
             if self.detach_scores:
                 scores = scores.detach()
             scores = self._normalize_scores(scores.to(dtype=logits.dtype))
@@ -199,7 +199,7 @@ class AdaptiveRoutingStage(nn.Module):
 class IndependentMaskedAggregation(nn.Module):
     """Refine each modality CLS from its own selected patch tokens.
 
-    This is the independent stage that precedes collaborative FACR routing in
+    This is the independent stage that precedes collaborative ACI routing in
     T11. One block is shared across modalities so the added capacity does not
     encode modality-specific parameter-count differences. Patch sequences are
     preserved; only the class tokens are updated.
@@ -232,7 +232,7 @@ class FinalSelfRefinement(nn.Module):
     def __init__(self, dim, num_heads, scale_init=0.1):
         super().__init__()
         if float(scale_init) < 0.0:
-            raise ValueError('FACR self-refinement scale must be non-negative')
+            raise ValueError('ACI self-refinement scale must be non-negative')
         self.query_norm = nn.LayerNorm(dim)
         self.attn = ScoreBiasedCrossAttention(
             dim, num_heads=num_heads, score_bias_scale=0.0)
@@ -250,7 +250,7 @@ class FinalSelfRefinement(nn.Module):
         if residual_token is not None:
             if residual_token.shape != target.shape:
                 raise ValueError(
-                    'HS residual token must match the FACR class-token shape')
+                    'HS residual token must match the ACI class-token shape')
             source_tokens = torch.cat(
                 [source_tokens, residual_token.unsqueeze(1)], dim=1)
             if attention_mask is None:
@@ -270,16 +270,16 @@ class FinalSelfRefinement(nn.Module):
         return self._replace_cls(feat, refined)
 
 
-class FACR(nn.Module):
-    """FACSS-guided Adaptive Cross-modal Routing.
+class ACI(nn.Module):
+    """Adaptive Cross-modal Interaction.
 
     Unlike the fixed-cycle TOP-ReID TPM it replaces, every target modality
-    reads both other modalities. FACSS scores bias patch attention
-    continuously, while a learned route and per-channel residual gate control
+    reads both other modalities. Continuous selector scores can bias patch
+    attention, while a learned route and per-channel residual gate control
     source and injection strength per sample. An optional independent
     pre-stage first lets each class token read its own masked patches before
-    collaborative routing. An optional final refinement lets each routed class
-    token read its own selected patches and the HS residual summary.
+    collaborative interaction. An optional final refinement lets each routed
+    class token read its own selected patches and the HS residual summary.
     """
 
     def __init__(self, dim, num_heads=12, steps=3, score_bias_scale=0.25,
@@ -292,7 +292,7 @@ class FACR(nn.Module):
         self.self_refine_enabled = bool(self_refine)
         self.independent_aggregation_enabled = bool(independent_aggregation)
         if self.route_balance_weight < 0.0:
-            raise ValueError('FACR route balance weight must be non-negative')
+            raise ValueError('ACI route balance weight must be non-negative')
         if self.independent_aggregation_enabled:
             self.independent_aggregation = IndependentMaskedAggregation(
                 dim, num_heads=num_heads)
@@ -309,7 +309,7 @@ class FACR(nn.Module):
             self.self_refinement = FinalSelfRefinement(
                 dim, num_heads=num_heads,
                 scale_init=self_refine_scale_init)
-        self.apply(FACR._init_weights)
+        self.apply(ACI._init_weights)
         # Restore neutral initial routing/gating after generic initialization.
         for stage in self.stages:
             nn.init.zeros_(stage.route[-1].weight)
@@ -330,13 +330,13 @@ class FACR(nn.Module):
     def forward(self, rgb, nir, tir, scores=None, masks=None,
                 residual_tokens=None):
         if scores is not None and len(scores) != 3:
-            raise ValueError('FACR requires one FACSS score tensor per modality')
+            raise ValueError('ACI requires one score tensor per modality')
         if masks is not None and len(masks) != 3:
-            raise ValueError('FACR requires one FACSS mask tensor per modality')
+            raise ValueError('ACI requires one selection mask tensor per modality')
         if residual_tokens is not None and len(residual_tokens) != 3:
-            raise ValueError('FACR requires one HS residual token per modality')
+            raise ValueError('ACI requires one HS residual token per modality')
         if residual_tokens is not None and not self.self_refine_enabled:
-            raise ValueError('HS residual tokens require FACR self-refinement')
+            raise ValueError('HS residual tokens require ACI self-refinement')
         feats = (rgb, nir, tir)
         if self.independent_aggregation_enabled:
             feats = self.independent_aggregation(feats, masks)

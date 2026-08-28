@@ -25,7 +25,7 @@ Coverage:
  16. The legacy-style A2 config runs quality-aware frequency selection
  17. Optimized rollout and frequency kernels preserve their reference outputs
  18. AdamW uses grouped multi-tensor parameter groups
- 19. FACR route balancing is differentiable and disabled by default
+ 19. ACI route balancing is differentiable and disabled by default
  20. T11 independent masked aggregation ignores dropped patches, backpropagates,
      and is disabled for all existing configurations
  21. T12 shared token reconstruction excludes the target input, stop-gradients
@@ -43,7 +43,7 @@ import torch
 from config import cfg as default_cfg
 from modeling.make_model import make_model
 from modeling.fusion_part.Frequency import Frequency_based_Token_Selection
-from modeling.fusion_part.FACR import FACR, ScoreBiasedCrossAttention
+from modeling.fusion_part.ACI import ACI, ScoreBiasedCrossAttention
 from modeling.fusion_part.HS import HS, PartAttention
 from modeling.fusion_part.CrossModalReconstruction import \
     SharedCrossModalTokenReconstruction
@@ -364,7 +364,7 @@ def test_paper_config_matrix():
         )
         assert actual == values, '{} switches {} != {}'.format(row, actual, values)
         assert not c.MODEL.FREQUENCY_ENABLED
-        assert not c.MODEL.FACR
+        assert not c.MODEL.ACI
         assert not c.MODEL.MODALITY_ADAPTER
         assert not c.MODEL.PART_BRANCH
         assert not c.MODEL.OCFR
@@ -516,8 +516,8 @@ def test_optimizer_parameter_groups():
     print('     OK {} tensors -> {} optimizer groups'.format(tensor_count, grouped_count))
 
 
-def test_facr_score_bias_starts_from_t2():
-    print('[13] FACR score bias and hard mask behavior')
+def test_aci_score_bias_starts_from_t2():
+    print('[13] ACI score bias and hard mask behavior')
     torch.manual_seed(11)
     attention = ScoreBiasedCrossAttention(
         dim=16, num_heads=2, score_bias_scale=0.25,
@@ -558,46 +558,46 @@ def test_facr_score_bias_starts_from_t2():
 
     t4 = default_cfg.clone()
     t4.merge_from_file(PAPER_BASE)
-    t4.merge_from_file('configs/RGBNT201/fusion/t4_facss_masked_facr.yml')
-    assert t4.MODEL.FACR
-    assert t4.MODEL.FACR_USE_MASKS
-    assert not t4.MODEL.FACR_USE_SCORES
+    t4.merge_from_file('configs/RGBNT201/fusion/t4_facss_masked_aci.yml')
+    assert t4.MODEL.ACI
+    assert t4.MODEL.ACI_USE_MASKS
+    assert not t4.MODEL.ACI_USE_SCORES
     assert t4.MODEL.HS_ENABLED
     print('     OK initial output=T2; gain bounded at {:.3f}; mask is hard'.format(
         effective_gain))
 
 
-def test_facr_route_balance_loss():
-    print('[14] FACR batch-level route balance loss')
+def test_aci_route_balance_loss():
+    print('[14] ACI batch-level route balance loss')
     torch.manual_seed(19)
-    facr = FACR(
+    aci = ACI(
         dim=16, num_heads=2, steps=2, score_bias_scale=0.0,
         route_balance_weight=0.05).train()
     with torch.no_grad():
-        for stage in facr.stages:
+        for stage in aci.stages:
             stage.route[-1].weight.normal_(mean=0.0, std=0.2)
     feats = tuple(
         torch.randn(4, 7, 16, requires_grad=True) for _ in range(3)
     )
-    fused = facr(*feats)
-    balance_loss = facr.regularization_loss(fused)
+    fused = aci(*feats)
+    balance_loss = aci.regularization_loss(fused)
     assert balance_loss.item() > 0.0
     balance_loss.backward()
     route_grad = sum(
         parameter.grad.abs().sum().item()
-        for stage in facr.stages
+        for stage in aci.stages
         for parameter in stage.route.parameters()
         if parameter.grad is not None
     )
     assert route_grad > 0.0
-    stats = facr.route_statistics()
+    stats = aci.route_statistics()
     assert set(stats) == {
         'mean_entropy', 'mean_max_probability', 'mean_balance_deviation'
     }
     assert 0.0 <= stats['mean_max_probability'].item() <= 1.0
     assert stats['mean_balance_deviation'].item() >= 0.0
 
-    disabled = FACR(dim=16, num_heads=2, steps=1, route_balance_weight=0.0)
+    disabled = ACI(dim=16, num_heads=2, steps=1, route_balance_weight=0.0)
     disabled_out = disabled(*tuple(torch.randn(2, 7, 16) for _ in range(3)))
     assert disabled.regularization_loss(disabled_out).item() == 0.0
 
@@ -606,16 +606,16 @@ def test_facr_route_balance_loss():
     cfg.merge_from_file(
         'configs/RGBNT201/fusion/t8_sfts_fixed_k16_route_balance.yml')
     assert cfg.MODEL.HS_ENABLED
-    assert cfg.MODEL.FACR
-    assert cfg.MODEL.FACR_USE_MASKS
-    assert cfg.MODEL.FACR_ROUTE_BALANCE_WEIGHT == 0.05
+    assert cfg.MODEL.ACI
+    assert cfg.MODEL.ACI_USE_MASKS
+    assert cfg.MODEL.ACI_ROUTE_BALANCE_WEIGHT == 0.05
     assert cfg.MODEL.HS_RATIO == 0.125
     print('     OK loss={:.6f}; route_grad={:.6f}'.format(
         balance_loss.item(), route_grad))
 
 
-def test_facr_independent_masked_aggregation():
-    print('[15] FACR pre-routing independent masked aggregation')
+def test_aci_independent_masked_aggregation():
+    print('[15] ACI pre-routing independent masked aggregation')
     torch.manual_seed(23)
     batch, patches, dim = 2, 6, 16
     features = tuple(
@@ -629,10 +629,10 @@ def test_facr_independent_masked_aggregation():
             dtype=torch.bool)
         for _ in range(3)
     )
-    facr = FACR(
+    aci = ACI(
         dim=dim, num_heads=4, steps=1, score_bias_scale=0.0,
         independent_aggregation=True).train()
-    descriptor = facr(*features, masks=masks)
+    descriptor = aci(*features, masks=masks)
     assert descriptor.shape == (batch, 3 * dim)
     assert torch.isfinite(descriptor).all()
 
@@ -640,13 +640,13 @@ def test_facr_independent_masked_aggregation():
     for feature, mask in zip(changed, masks):
         feature[:, 1:, :][~mask] = torch.randn_like(
             feature[:, 1:, :][~mask]) * 1e4
-    changed_descriptor = facr(*changed, masks=masks)
+    changed_descriptor = aci(*changed, masks=masks)
     assert torch.allclose(
         descriptor.detach(), changed_descriptor, atol=1e-5, rtol=1e-5)
 
     descriptor.square().mean().backward()
     independent_parameters = [
-        parameter for name, parameter in facr.named_parameters()
+        parameter for name, parameter in aci.named_parameters()
         if name.startswith('independent_aggregation.') and parameter.requires_grad
     ]
     assert independent_parameters
@@ -654,10 +654,10 @@ def test_facr_independent_masked_aggregation():
         parameter.grad is not None and torch.isfinite(parameter.grad).all()
         for parameter in independent_parameters)
 
-    disabled = FACR(dim=dim, num_heads=4, steps=1)
+    disabled = ACI(dim=dim, num_heads=4, steps=1)
     assert not hasattr(disabled, 'independent_aggregation')
     try:
-        facr(*tuple(feature.detach() for feature in features))
+        aci(*tuple(feature.detach() for feature in features))
     except ValueError as exc:
         assert 'one mask per modality' in str(exc)
     else:
@@ -666,21 +666,21 @@ def test_facr_independent_masked_aggregation():
     cfg = default_cfg.clone()
     cfg.merge_from_file(PAPER_BASE)
     cfg.merge_from_file(
-        'configs/RGBNT201/fusion/t11_sfts_k1_independent_facr.yml')
+        'configs/RGBNT201/fusion/t11_sfts_k1_independent_aci.yml')
     assert cfg.MODEL.HS_ENABLED
     assert cfg.MODEL.HS_RATIO == 0.0078125
-    assert cfg.MODEL.FACR
-    assert cfg.MODEL.FACR_USE_MASKS
-    assert cfg.MODEL.FACR_INDEPENDENT_AGG
-    assert not cfg.MODEL.FACR_SELF_REFINE
-    assert not cfg.MODEL.FACR_USE_SCORES
+    assert cfg.MODEL.ACI
+    assert cfg.MODEL.ACI_USE_MASKS
+    assert cfg.MODEL.ACI_INDEPENDENT_AGG
+    assert not cfg.MODEL.ACI_SELF_REFINE
+    assert not cfg.MODEL.ACI_USE_SCORES
     cfg.MODEL.PRETRAIN_CHOICE = 'self'
     cfg.MODEL.SIE_CAMERA = False
     cfg.INPUT.SIZE_TRAIN = [128, 64]
     cfg.INPUT.SIZE_TEST = [128, 64]
     model = make_model(cfg, num_class=NUM_CLASSES, camera_num=0).cpu()
-    assert model.facr_independent_aggregation
-    assert model.FACR.independent_aggregation_enabled
+    assert model.aci_independent_aggregation
+    assert model.ACI.independent_aggregation_enabled
     model.train()
     inputs = _dummy_batch(cfg)
     labels = torch.randint(0, NUM_CLASSES, (BATCH,))
@@ -689,7 +689,7 @@ def test_facr_independent_masked_aggregation():
     _loss_assembly_like_processor(output).backward()
     wired_parameters = [
         parameter for name, parameter in model.named_parameters()
-        if 'FACR.independent_aggregation.' in name and parameter.requires_grad
+        if 'ACI.independent_aggregation.' in name and parameter.requires_grad
     ]
     assert wired_parameters
     assert all(
@@ -744,8 +744,8 @@ def test_shared_cross_modal_token_reconstruction():
         'configs/RGBNT201/fusion/t12_sfts_k1_shared_token_recon.yml')
     assert cfg.MODEL.HS_ENABLED
     assert cfg.MODEL.HS_RATIO == 0.0078125
-    assert cfg.MODEL.FACR and cfg.MODEL.FACR_USE_MASKS
-    assert not cfg.MODEL.FACR_INDEPENDENT_AGG
+    assert cfg.MODEL.ACI and cfg.MODEL.ACI_USE_MASKS
+    assert not cfg.MODEL.ACI_INDEPENDENT_AGG
     assert cfg.MODEL.CROSS_MODAL_RECON_ENABLED
     assert cfg.MODEL.CROSS_MODAL_RECON_HIDDEN_DIM == 256
     assert cfg.MODEL.CROSS_MODAL_RECON_LOSS_WEIGHT == 0.1
@@ -755,7 +755,7 @@ def test_shared_cross_modal_token_reconstruction():
     baseline_cfg = default_cfg.clone()
     baseline_cfg.merge_from_file(PAPER_BASE)
     baseline_cfg.merge_from_file(
-        'configs/RGBNT201/fusion/t7_sfts_fixed_k1_facr.yml')
+        'configs/RGBNT201/fusion/t7_sfts_fixed_k1_aci.yml')
     assert not baseline_cfg.MODEL.CROSS_MODAL_RECON_ENABLED
 
     cfg.MODEL.PRETRAIN_CHOICE = 'self'
@@ -897,9 +897,9 @@ def main():
     test_hs_selection_modes()
     test_optimized_kernels_equivalent()
     test_optimizer_parameter_groups()
-    test_facr_score_bias_starts_from_t2()
-    test_facr_route_balance_loss()
-    test_facr_independent_masked_aggregation()
+    test_aci_score_bias_starts_from_t2()
+    test_aci_route_balance_loss()
+    test_aci_independent_masked_aggregation()
     test_shared_cross_modal_token_reconstruction()
     test_paper_model_modes()
     test_legacy_a2_quality_frequency()

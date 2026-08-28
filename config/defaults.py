@@ -60,7 +60,7 @@ _C.MODEL.HS_GUMBEL_TAU_MIN = 0.2
 _C.MODEL.HS_GUMBEL_TAU_DECAY = 0.9
 _C.MODEL.HS_BUDGET_LOSS_WEIGHT = 0.05
 # Preserve information outside the shared hard mask as one attention-weighted
-# residual token per modality. Consumed only by FACR final self-refinement.
+# residual token per modality. Consumed only by ACI final self-refinement.
 _C.MODEL.HS_RESIDUAL_TOKEN = 0
 _C.MODEL.SELECTED_PATCH_BLEND_WEIGHT = 0.15
 _C.MODEL.SELECTED_PATCH_CONTEXT = 'mean'
@@ -70,35 +70,35 @@ _C.MODEL.SELECTED_AGGREGATION = 0
 _C.MODEL.SELECTED_AGG_NUM_HEADS = 12
 _C.MODEL.SELECTED_AGG_GATE_INIT_BIAS = -2.0
 _C.MODEL.SELECTED_AGG_RESIDUAL_WEIGHT = 0.5
-# FACSS-guided Adaptive Cross-modal Routing (project extension).
-_C.MODEL.FACR = 0
-_C.MODEL.FACR_USE_SCORES = 1
-_C.MODEL.FACR_USE_MASKS = 0
-_C.MODEL.FACR_NUM_HEADS = 12
-_C.MODEL.FACR_STEPS = 3
-_C.MODEL.FACR_SCORE_BIAS_SCALE = 0.25
-_C.MODEL.FACR_SCORE_FLOOR = 0.05
-_C.MODEL.FACR_DETACH_SCORES = 1
-_C.MODEL.FACR_GATE_INIT_BIAS = 0.0
-# Preserve the selector descriptor and add only FACR's routed delta. Existing
+# Adaptive Cross-modal Interaction (project extension).
+_C.MODEL.ACI = 0
+_C.MODEL.ACI_USE_SCORES = 1
+_C.MODEL.ACI_USE_MASKS = 0
+_C.MODEL.ACI_NUM_HEADS = 12
+_C.MODEL.ACI_STEPS = 3
+_C.MODEL.ACI_SCORE_BIAS_SCALE = 0.25
+_C.MODEL.ACI_SCORE_FLOOR = 0.05
+_C.MODEL.ACI_DETACH_SCORES = 1
+_C.MODEL.ACI_GATE_INIT_BIAS = 0.0
+# Preserve the selector descriptor and add only ACI's routed delta. Existing
 # experiments keep the historical replacement behavior unless explicitly
 # enabled by a row config.
-_C.MODEL.FACR_RESIDUAL_FUSION = 0
-_C.MODEL.FACR_RESIDUAL_SCALE_INIT = 0.1
-# Train FACR as an auxiliary branch from detached backbone tokens so its loss
+_C.MODEL.ACI_RESIDUAL_FUSION = 0
+_C.MODEL.ACI_RESIDUAL_SCALE_INIT = 0.1
+# Train ACI as an auxiliary branch from detached backbone tokens so its loss
 # cannot alter the selector/main branch. The routed descriptor is supervised by
 # its own BNNeck and classifier and can be concatenated only at test time.
-_C.MODEL.FACR_ISOLATED_BRANCH = 0
-# Optional own-modality masked aggregation before collaborative FACR stages.
+_C.MODEL.ACI_ISOLATED_BRANCH = 0
+# Optional own-modality masked aggregation before collaborative ACI stages.
 # This follows the independent-before-collaborative ordering investigated by
-# T11 while leaving every existing FACR configuration unchanged by default.
-_C.MODEL.FACR_INDEPENDENT_AGG = 0
+# T11 while leaving every existing ACI configuration unchanged by default.
+_C.MODEL.ACI_INDEPENDENT_AGG = 0
 # Optional final own-modality patch read after the adaptive cross-modal stages.
-_C.MODEL.FACR_SELF_REFINE = 0
-_C.MODEL.FACR_SELF_REFINE_SCALE_INIT = 0.1
-# Batch-level load balancing for FACR. It keeps both candidate source
+_C.MODEL.ACI_SELF_REFINE = 0
+_C.MODEL.ACI_SELF_REFINE_SCALE_INIT = 0.1
+# Batch-level load balancing for ACI. It keeps both candidate source
 # modalities used across a batch without forcing every sample to route 50/50.
-_C.MODEL.FACR_ROUTE_BALANCE_WEIGHT = 0.0
+_C.MODEL.ACI_ROUTE_BALANCE_WEIGHT = 0.0
 # Training-only shared cross-modal token reconstruction. This is an attributed
 # CRM-inspired auxiliary objective adapted to the shared-backbone setting; it
 # never changes the inference descriptor or existing checkpoints by default.
@@ -302,8 +302,8 @@ _C.TEST.ORIGINAL_CLS_FEAT = 'off'
 _C.TEST.ORIGINAL_CLS_FEAT_WEIGHT = 0.5
 _C.TEST.DECOUPLED_MOE_FEAT = 'off'
 _C.TEST.DECOUPLED_MOE_FEAT_WEIGHT = 0.5
-_C.TEST.FACR_ISOLATED_FEAT = 'off'
-_C.TEST.FACR_ISOLATED_FEAT_WEIGHT = 0.25
+_C.TEST.ACI_ISOLATED_FEAT = 'off'
+_C.TEST.ACI_ISOLATED_FEAT_WEIGHT = 0.25
 # ----------------------------------------------------------a------------------ #
 # Misc options
 # ---------------------------------------------------------------------------- #

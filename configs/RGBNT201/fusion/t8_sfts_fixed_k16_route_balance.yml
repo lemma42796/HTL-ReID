@@ -1,4 +1,4 @@
-# T8: E014/K=16 plus batch-level FACR route balancing. This is a one-factor
+# T8: E014/K=16 plus batch-level ACI route balancing. This is a one-factor
 # loss ablation; all selector, fusion, training, and evaluation settings match T7.
 MODEL:
   HS_ENABLED: 1
@@ -8,15 +8,15 @@ MODEL:
   FREQUENCY_ENABLED: 1
   QUALITY_AWARE: 0
   SELECTED_PATCH_BLEND_WEIGHT: 0.0
-  FACR: 1
-  FACR_USE_SCORES: 0
-  FACR_USE_MASKS: 1
-  FACR_NUM_HEADS: 12
-  FACR_STEPS: 3
-  FACR_SCORE_BIAS_SCALE: 0.0
-  FACR_SCORE_FLOOR: 0.05
-  FACR_DETACH_SCORES: 1
-  FACR_GATE_INIT_BIAS: 0.0
-  FACR_ROUTE_BALANCE_WEIGHT: 0.05
+  ACI: 1
+  ACI_USE_SCORES: 0
+  ACI_USE_MASKS: 1
+  ACI_NUM_HEADS: 12
+  ACI_STEPS: 3
+  ACI_SCORE_BIAS_SCALE: 0.0
+  ACI_SCORE_FLOOR: 0.05
+  ACI_DETACH_SCORES: 1
+  ACI_GATE_INIT_BIAS: 0.0
+  ACI_ROUTE_BALANCE_WEIGHT: 0.05
   AUX_LOSS_WEIGHT: 1.0
   AUX_WARMUP_EPOCHS: 0

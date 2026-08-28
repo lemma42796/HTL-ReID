@@ -231,7 +231,7 @@ class HS(nn.Module):
         masks = tuple(shared_mask for _ in modalities)
         result = tuple(selected[name] for name, _, _ in modalities) + (masks,)
 
-        # Preserve the hard-gate portion of the selector contract used by FACR.
+        # Preserve the hard-gate portion of the selector contract used by ACI.
         if return_gates:
             gate = shared_gate.to(RGB_feat.dtype)
             result += (tuple(gate for _ in modalities),)

@@ -1,4 +1,4 @@
-# T14: preserve the E042 FACR path and add a DeMo-inspired seven-route MoE.
+# T14: preserve the E042 ACI path and add a DeMo-inspired seven-route MoE.
 MODEL:
   RESUME_PATH: '/root/autodl-tmp/outputs/HTL-ReID/E042_T12_peak_warmstart_seed1111/HTL-ReID_best.pth'
   HS_ENABLED: 1
@@ -10,18 +10,18 @@ MODEL:
   QUALITY_AWARE: 0
   SELECTED_PATCH_BLEND_WEIGHT: 0.0
 
-  FACR: 1
-  FACR_USE_SCORES: 0
-  FACR_USE_MASKS: 1
-  FACR_NUM_HEADS: 12
-  FACR_STEPS: 3
-  FACR_SCORE_BIAS_SCALE: 0.0
-  FACR_SCORE_FLOOR: 0.05
-  FACR_DETACH_SCORES: 1
-  FACR_GATE_INIT_BIAS: 0.0
-  FACR_INDEPENDENT_AGG: 0
-  FACR_SELF_REFINE: 0
-  FACR_ROUTE_BALANCE_WEIGHT: 0.0
+  ACI: 1
+  ACI_USE_SCORES: 0
+  ACI_USE_MASKS: 1
+  ACI_NUM_HEADS: 12
+  ACI_STEPS: 3
+  ACI_SCORE_BIAS_SCALE: 0.0
+  ACI_SCORE_FLOOR: 0.05
+  ACI_DETACH_SCORES: 1
+  ACI_GATE_INIT_BIAS: 0.0
+  ACI_INDEPENDENT_AGG: 0
+  ACI_SELF_REFINE: 0
+  ACI_ROUTE_BALANCE_WEIGHT: 0.0
 
   # Stop stacking auxiliary objectives. The new branch uses the existing
   # label-smoothed CE + triplet objective through the standard branch loss.

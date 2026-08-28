@@ -17,8 +17,8 @@ ROWS = (
      "E049_A0_backbone_RGBNT201_seed1111"),
     ("E050", "A1-SFTS", "configs/RGBNT201/ablations/t14_chain/a1_sfts.yml",
      "E050_A1_sfts_RGBNT201_seed1111"),
-    ("E051", "A2-FACR", "configs/RGBNT201/ablations/t14_chain/a2_facr.yml",
-     "E051_A2_facr_RGBNT201_seed1111"),
+    ("E051", "A2-ACI", "configs/RGBNT201/ablations/t14_chain/a2_aci.yml",
+     "E051_A2_aci_RGBNT201_seed1111"),
     ("E052", "A3-PART", "configs/RGBNT201/ablations/t14_chain/a3_part.yml",
      "E052_A3_part_RGBNT201_seed1111"),
 )

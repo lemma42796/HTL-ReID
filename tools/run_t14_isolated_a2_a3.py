@@ -15,9 +15,9 @@ CHAIN_NAME = "E055_E056_isolated_A2_A3"
 A1_MAP = 68.10
 A1_RANK1 = 69.02
 ROWS = (
-    ("E055", "A2-FACR-ISOLATED",
-     "configs/RGBNT201/ablations/t14_chain/a2_facr_isolated.yml",
-     "E055_A2_facr_isolated_RGBNT201_seed1111"),
+    ("E055", "A2-ACI-ISOLATED",
+     "configs/RGBNT201/ablations/t14_chain/a2_aci_isolated.yml",
+     "E055_A2_aci_isolated_RGBNT201_seed1111"),
     ("E056", "A3-PART-ISOLATED",
      "configs/RGBNT201/ablations/t14_chain/a3_part_isolated.yml",
      "E056_A3_part_isolated_RGBNT201_seed1111"),

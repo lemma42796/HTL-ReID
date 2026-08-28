@@ -1,4 +1,4 @@
-"""CPU regression checks for HS residual tokens and FACR self-refinement."""
+"""CPU regression checks for HS residual tokens and ACI self-refinement."""
 
 import argparse
 from pathlib import Path
@@ -12,14 +12,14 @@ if str(REPO_ROOT) not in sys.path:
 
 from config import cfg as default_cfg
 from modeling.fusion_part.HS import HS
-from modeling.fusion_part.FACR import FACR
+from modeling.fusion_part.ACI import ACI
 from modeling.make_model import make_model
 
 
 BASE = 'configs/RGBNT201/paper/base.yml'
 ROWS = (
-    'configs/RGBNT201/fusion/t9_facr_self_refine.yml',
-    'configs/RGBNT201/fusion/t10_sfts_k1_residual_facr.yml',
+    'configs/RGBNT201/fusion/t9_aci_self_refine.yml',
+    'configs/RGBNT201/fusion/t10_sfts_k1_residual_aci.yml',
 )
 
 
@@ -35,8 +35,8 @@ def check_configs():
         cfg = default_cfg.clone()
         cfg.merge_from_file(BASE)
         cfg.merge_from_file(row)
-        assert cfg.MODEL.FACR
-        assert cfg.MODEL.FACR_SELF_REFINE
+        assert cfg.MODEL.ACI
+        assert cfg.MODEL.ACI_SELF_REFINE
     print('OK config merge')
 
 
@@ -79,7 +79,7 @@ def check_hs_residual_gradient():
     print('OK HS residual-token gradient')
 
 
-def check_facr_self_refinement():
+def check_aci_self_refinement():
     torch.manual_seed(17)
     batch, patches, dim = 2, 8, 16
     features = tuple(
@@ -97,7 +97,7 @@ def check_facr_self_refinement():
         torch.randn(batch, dim, requires_grad=True)
         for _ in range(3)
     )
-    model = FACR(
+    model = ACI(
         dim=dim, num_heads=4, steps=2,
         score_bias_scale=0.0, self_refine=True,
         self_refine_scale_init=0.1)
@@ -112,11 +112,11 @@ def check_facr_self_refinement():
                for p in parameters)
     assert all(token.grad is not None and token.grad.abs().sum() > 0
                for token in residual_tokens)
-    print('OK FACR self-refinement forward/backward')
+    print('OK ACI self-refinement forward/backward')
 
 
 def check_disabled_contract():
-    model = FACR(dim=16, num_heads=4, steps=1, self_refine=False)
+    model = ACI(dim=16, num_heads=4, steps=1, self_refine=False)
     assert not hasattr(model, 'self_refinement')
     features = tuple(torch.randn(2, 9, 16) for _ in range(3))
     descriptor = model(*features)
@@ -125,7 +125,7 @@ def check_disabled_contract():
 
 
 def check_full_model():
-    row = 'configs/RGBNT201/fusion/t10_sfts_k1_residual_facr.yml'
+    row = 'configs/RGBNT201/fusion/t10_sfts_k1_residual_aci.yml'
     cfg = default_cfg.clone()
     cfg.merge_from_file(BASE)
     cfg.merge_from_file(row)
@@ -148,7 +148,7 @@ def check_full_model():
     loss.backward()
     self_refine = [
         parameter for name, parameter in model.named_parameters()
-        if 'FACR.self_refinement' in name and parameter.requires_grad
+        if 'ACI.self_refinement' in name and parameter.requires_grad
     ]
     assert self_refine
     assert all(parameter.grad is not None and torch.isfinite(parameter.grad).all()
@@ -167,7 +167,7 @@ def main():
     args = parser.parse_args()
     check_configs()
     check_hs_residual_gradient()
-    check_facr_self_refinement()
+    check_aci_self_refinement()
     check_disabled_contract()
     if args.full_model:
         check_full_model()

@@ -7,17 +7,19 @@ from modeling.backbones.vit_pytorch import vit_base_patch16_224, vit_small_patch
 from modeling.fusion_part.Frequency import Frequency_based_Token_Selection
 from modeling.fusion_part.OCFR import OCFR
 from modeling.fusion_part.HS import HS
-from modeling.fusion_part.FACR import FACR
+from modeling.fusion_part.ACI import ACI
 from modeling.fusion_part.CrossModalReconstruction import \
     SharedCrossModalTokenReconstruction
 from modeling.fusion_part.DecoupledMoEFusion import DecoupledMoEFusion
 
 
 # Frozen checkpoints (E042/E043/E046/E047...) store the HS selector under
-# its historical 'SFTS.' prefix. Map it onto the renamed 'HS.' module so the
-# weights load without re-exporting checkpoints.
+# its historical 'SFTS.' prefix and the ACI fusion module under its historical
+# 'FACR.' prefix. Map them onto the renamed modules so the weights load
+# without re-exporting checkpoints.
 _CHECKPOINT_KEY_REMAPS = {
     'SFTS.': 'HS.',
+    'FACR.': 'ACI.',
 }
 
 
@@ -289,18 +291,18 @@ class HTLReID(nn.Module):
         self.FREQ_INDEX = Frequency_based_Token_Selection(keep=cfg.MODEL.FREQUENCY_KEEP,
                                                           stride=cfg.MODEL.STRIDE_SIZE[0],
                                                           quality_aware=cfg.MODEL.FREQUENCY_QUALITY_AWARE)
-        self.use_facr = bool(cfg.MODEL.FACR)
-        self.facr_use_scores = bool(cfg.MODEL.FACR_USE_SCORES)
-        self.facr_use_masks = bool(cfg.MODEL.FACR_USE_MASKS)
-        self.facr_residual_fusion = bool(
-            cfg.MODEL.FACR_RESIDUAL_FUSION)
-        self.facr_residual_scale_init = float(
-            cfg.MODEL.FACR_RESIDUAL_SCALE_INIT)
-        self.facr_isolated_branch = bool(
-            cfg.MODEL.FACR_ISOLATED_BRANCH)
-        self.facr_independent_aggregation = bool(
-            cfg.MODEL.FACR_INDEPENDENT_AGG)
-        self.facr_self_refine = bool(cfg.MODEL.FACR_SELF_REFINE)
+        self.use_aci = bool(cfg.MODEL.ACI)
+        self.aci_use_scores = bool(cfg.MODEL.ACI_USE_SCORES)
+        self.aci_use_masks = bool(cfg.MODEL.ACI_USE_MASKS)
+        self.aci_residual_fusion = bool(
+            cfg.MODEL.ACI_RESIDUAL_FUSION)
+        self.aci_residual_scale_init = float(
+            cfg.MODEL.ACI_RESIDUAL_SCALE_INIT)
+        self.aci_isolated_branch = bool(
+            cfg.MODEL.ACI_ISOLATED_BRANCH)
+        self.aci_independent_aggregation = bool(
+            cfg.MODEL.ACI_INDEPENDENT_AGG)
+        self.aci_self_refine = bool(cfg.MODEL.ACI_SELF_REFINE)
         self.use_cross_modal_recon = bool(
             cfg.MODEL.CROSS_MODAL_RECON_ENABLED)
         self.cross_modal_recon_loss_weight = float(
@@ -308,34 +310,34 @@ class HTLReID(nn.Module):
         self.hetero_triplet_weight = float(cfg.MODEL.HETERO_TRIPLET_WEIGHT)
         self.hetero_triplet_margin = float(cfg.MODEL.HETERO_TRIPLET_MARGIN)
         self.use_decoupled_moe = bool(cfg.MODEL.DECOUPLED_MOE)
-        self._last_facr_stats_epoch = None
-        if self.use_facr and self.facr_use_scores:
-            raise ValueError('FACR_USE_SCORES requires continuous selector scores, '
+        self._last_aci_stats_epoch = None
+        if self.use_aci and self.aci_use_scores:
+            raise ValueError('ACI_USE_SCORES requires continuous selector scores, '
                              'which the HS selector does not provide')
-        if self.use_facr and self.facr_use_masks and not self.use_hs:
-            raise ValueError('FACR_USE_MASKS requires HS')
-        if self.facr_residual_fusion and not self.use_facr:
-            raise ValueError('FACR_RESIDUAL_FUSION requires FACR')
-        if self.facr_isolated_branch and not self.use_facr:
-            raise ValueError('FACR_ISOLATED_BRANCH requires FACR')
-        if self.facr_isolated_branch and self.facr_residual_fusion:
+        if self.use_aci and self.aci_use_masks and not self.use_hs:
+            raise ValueError('ACI_USE_MASKS requires HS')
+        if self.aci_residual_fusion and not self.use_aci:
+            raise ValueError('ACI_RESIDUAL_FUSION requires ACI')
+        if self.aci_isolated_branch and not self.use_aci:
+            raise ValueError('ACI_ISOLATED_BRANCH requires ACI')
+        if self.aci_isolated_branch and self.aci_residual_fusion:
             raise ValueError(
-                'FACR_ISOLATED_BRANCH and FACR_RESIDUAL_FUSION are mutually exclusive')
-        if self.facr_residual_fusion and not (
-                0.0 < self.facr_residual_scale_init < 1.0):
+                'ACI_ISOLATED_BRANCH and ACI_RESIDUAL_FUSION are mutually exclusive')
+        if self.aci_residual_fusion and not (
+                0.0 < self.aci_residual_scale_init < 1.0):
             raise ValueError(
-                'FACR_RESIDUAL_SCALE_INIT must be strictly between 0 and 1')
-        if self.facr_self_refine and not self.use_facr:
-            raise ValueError('FACR_SELF_REFINE requires FACR')
-        if self.facr_independent_aggregation and not self.use_facr:
-            raise ValueError('FACR_INDEPENDENT_AGG requires FACR')
-        if self.facr_independent_aggregation and not self.facr_use_masks:
+                'ACI_RESIDUAL_SCALE_INIT must be strictly between 0 and 1')
+        if self.aci_self_refine and not self.use_aci:
+            raise ValueError('ACI_SELF_REFINE requires ACI')
+        if self.aci_independent_aggregation and not self.use_aci:
+            raise ValueError('ACI_INDEPENDENT_AGG requires ACI')
+        if self.aci_independent_aggregation and not self.aci_use_masks:
             raise ValueError(
-                'FACR_INDEPENDENT_AGG requires FACR_USE_MASKS')
+                'ACI_INDEPENDENT_AGG requires ACI_USE_MASKS')
         if self.hs_residual_token and not (
-                self.use_facr and self.facr_use_masks and self.facr_self_refine):
+                self.use_aci and self.aci_use_masks and self.aci_self_refine):
             raise ValueError(
-                'HS_RESIDUAL_TOKEN requires masked FACR self-refinement')
+                'HS_RESIDUAL_TOKEN requires masked ACI self-refinement')
         if self.cross_modal_recon_loss_weight < 0.0:
             raise ValueError(
                 'CROSS_MODAL_RECON_LOSS_WEIGHT must be non-negative')
@@ -388,18 +390,18 @@ class HTLReID(nn.Module):
                 "TEST.DECOUPLED_MOE_FEAT must be 'off', 'concat', or 'only'")
         if self.test_decoupled_moe_feat_weight < 0.0:
             raise ValueError('TEST.DECOUPLED_MOE_FEAT_WEIGHT must be non-negative')
-        self.test_facr_isolated_feat = cfg.TEST.FACR_ISOLATED_FEAT.lower()
-        self.test_facr_isolated_feat_weight = float(
-            cfg.TEST.FACR_ISOLATED_FEAT_WEIGHT)
-        if self.test_facr_isolated_feat not in ('off', 'concat', 'only'):
+        self.test_aci_isolated_feat = cfg.TEST.ACI_ISOLATED_FEAT.lower()
+        self.test_aci_isolated_feat_weight = float(
+            cfg.TEST.ACI_ISOLATED_FEAT_WEIGHT)
+        if self.test_aci_isolated_feat not in ('off', 'concat', 'only'):
             raise ValueError(
-                "TEST.FACR_ISOLATED_FEAT must be 'off', 'concat', or 'only'")
-        if self.test_facr_isolated_feat != 'off' and not self.facr_isolated_branch:
+                "TEST.ACI_ISOLATED_FEAT must be 'off', 'concat', or 'only'")
+        if self.test_aci_isolated_feat != 'off' and not self.aci_isolated_branch:
             raise ValueError(
-                'TEST.FACR_ISOLATED_FEAT requires FACR_ISOLATED_BRANCH')
-        if self.test_facr_isolated_feat_weight < 0.0:
+                'TEST.ACI_ISOLATED_FEAT requires ACI_ISOLATED_BRANCH')
+        if self.test_aci_isolated_feat_weight < 0.0:
             raise ValueError(
-                'TEST.FACR_ISOLATED_FEAT_WEIGHT must be non-negative')
+                'TEST.ACI_ISOLATED_FEAT_WEIGHT must be non-negative')
 
         self.selected_patch_blend_weight = float(cfg.MODEL.SELECTED_PATCH_BLEND_WEIGHT)
         self.selected_patch_context = cfg.MODEL.SELECTED_PATCH_CONTEXT.lower()
@@ -421,39 +423,39 @@ class HTLReID(nn.Module):
                 gate_init_bias=cfg.MODEL.SELECTED_AGG_GATE_INIT_BIAS,
                 residual_weight=cfg.MODEL.SELECTED_AGG_RESIDUAL_WEIGHT,
             )
-        if self.use_facr:
-            def build_facr():
-                return FACR(
+        if self.use_aci:
+            def build_aci():
+                return ACI(
                     dim=self.BACKBONE.token_dim,
-                    num_heads=cfg.MODEL.FACR_NUM_HEADS,
-                    steps=cfg.MODEL.FACR_STEPS,
-                    score_bias_scale=(cfg.MODEL.FACR_SCORE_BIAS_SCALE
-                                      if self.facr_use_scores else 0.0),
-                    score_floor=cfg.MODEL.FACR_SCORE_FLOOR,
-                    detach_scores=bool(cfg.MODEL.FACR_DETACH_SCORES),
-                    gate_init_bias=cfg.MODEL.FACR_GATE_INIT_BIAS,
-                    route_balance_weight=cfg.MODEL.FACR_ROUTE_BALANCE_WEIGHT,
-                    self_refine=self.facr_self_refine,
-                    self_refine_scale_init=cfg.MODEL.FACR_SELF_REFINE_SCALE_INIT,
-                    independent_aggregation=self.facr_independent_aggregation,
+                    num_heads=cfg.MODEL.ACI_NUM_HEADS,
+                    steps=cfg.MODEL.ACI_STEPS,
+                    score_bias_scale=(cfg.MODEL.ACI_SCORE_BIAS_SCALE
+                                      if self.aci_use_scores else 0.0),
+                    score_floor=cfg.MODEL.ACI_SCORE_FLOOR,
+                    detach_scores=bool(cfg.MODEL.ACI_DETACH_SCORES),
+                    gate_init_bias=cfg.MODEL.ACI_GATE_INIT_BIAS,
+                    route_balance_weight=cfg.MODEL.ACI_ROUTE_BALANCE_WEIGHT,
+                    self_refine=self.aci_self_refine,
+                    self_refine_scale_init=cfg.MODEL.ACI_SELF_REFINE_SCALE_INIT,
+                    independent_aggregation=self.aci_independent_aggregation,
                 )
 
-            if self.facr_isolated_branch:
+            if self.aci_isolated_branch:
                 # Keep every later A1 head on the same initialization stream;
-                # FACR gets a deterministic, independent CPU RNG stream.
+                # ACI gets a deterministic, independent CPU RNG stream.
                 rng_state = torch.random.get_rng_state()
                 try:
                     torch.random.default_generator.manual_seed(
                         int(cfg.SOLVER.SEED) + 5500)
-                    self.FACR = build_facr()
+                    self.ACI = build_aci()
                 finally:
                     torch.random.set_rng_state(rng_state)
             else:
-                self.FACR = build_facr()
-            if self.facr_residual_fusion:
+                self.ACI = build_aci()
+            if self.aci_residual_fusion:
                 initial_scale = torch.tensor(
-                    self.facr_residual_scale_init, dtype=torch.float32)
-                self.FACR_RESIDUAL_LOGIT = nn.Parameter(
+                    self.aci_residual_scale_init, dtype=torch.float32)
+                self.ACI_RESIDUAL_LOGIT = nn.Parameter(
                     torch.logit(initial_scale))
         if self.use_cross_modal_recon:
             self.CROSS_MODAL_RECON = SharedCrossModalTokenReconstruction(
@@ -540,12 +542,12 @@ class HTLReID(nn.Module):
             self.PART_BN = nn.BatchNorm1d(part_dim)
             self.PART_HEAD = nn.Linear(part_dim, num_classes, bias=False)
             self.PART_HEAD.apply(weights_init_classifier)
-        if self.facr_isolated_branch:
-            self.FACR_ISOLATED_BN = nn.BatchNorm1d(
+        if self.aci_isolated_branch:
+            self.ACI_ISOLATED_BN = nn.BatchNorm1d(
                 3 * self.BACKBONE.token_dim)
-            self.FACR_ISOLATED_HEAD = nn.Linear(
+            self.ACI_ISOLATED_HEAD = nn.Linear(
                 3 * self.BACKBONE.token_dim, num_classes, bias=False)
-            self.FACR_ISOLATED_HEAD.apply(weights_init_classifier)
+            self.ACI_ISOLATED_HEAD.apply(weights_init_classifier)
 
     @staticmethod
     def _prepare_patch_mask(patches, mask=None):
@@ -617,34 +619,34 @@ class HTLReID(nn.Module):
         return torch.cat(cls_list, dim=-1)
 
     def _fusion_cls(self, full_feats, selected_feats, quality_scores=None,
-                    masks=None, hs_scores=None, facr_masks=None,
-                    facr_residual_tokens=None):
+                    masks=None, hs_scores=None, aci_masks=None,
+                    aci_residual_tokens=None):
         """Select exactly one descriptor path while keeping inputs explicit."""
         rgb_full, nir_full, tir_full = full_feats
         rgb_sel, nir_sel, tir_sel = selected_feats
-        if self.use_facr:
-            scores = hs_scores if self.facr_use_scores else None
-            facr_masks = facr_masks if self.facr_use_masks else None
-            facr_inputs = full_feats
-            if self.facr_isolated_branch:
-                facr_inputs = tuple(feature.detach() for feature in full_feats)
+        if self.use_aci:
+            scores = hs_scores if self.aci_use_scores else None
+            aci_masks = aci_masks if self.aci_use_masks else None
+            aci_inputs = full_feats
+            if self.aci_isolated_branch:
+                aci_inputs = tuple(feature.detach() for feature in full_feats)
                 if scores is not None:
                     scores = tuple(score.detach() for score in scores)
-                if facr_masks is not None:
-                    facr_masks = tuple(mask.detach() for mask in facr_masks)
-                if facr_residual_tokens is not None:
-                    facr_residual_tokens = tuple(
-                        token.detach() for token in facr_residual_tokens)
-            routed_cls = self.FACR(
-                *facr_inputs,
-                scores=scores, masks=facr_masks,
-                residual_tokens=facr_residual_tokens)
-            if self.facr_isolated_branch:
+                if aci_masks is not None:
+                    aci_masks = tuple(mask.detach() for mask in aci_masks)
+                if aci_residual_tokens is not None:
+                    aci_residual_tokens = tuple(
+                        token.detach() for token in aci_residual_tokens)
+            routed_cls = self.ACI(
+                *aci_inputs,
+                scores=scores, masks=aci_masks,
+                residual_tokens=aci_residual_tokens)
+            if self.aci_isolated_branch:
                 selector_cls = self._concat_cls(
                     rgb_sel, nir_sel, tir_sel,
                     quality_scores=quality_scores, masks=masks)
                 return selector_cls, routed_cls
-            if not self.facr_residual_fusion:
+            if not self.aci_residual_fusion:
                 return routed_cls
             selector_cls = self._concat_cls(
                 rgb_sel, nir_sel, tir_sel,
@@ -653,7 +655,7 @@ class HTLReID(nn.Module):
                 rgb_full[:, 0, :], nir_full[:, 0, :], tir_full[:, 0, :]
             ], dim=-1)
             residual_scale = torch.sigmoid(
-                self.FACR_RESIDUAL_LOGIT).to(dtype=routed_cls.dtype)
+                self.ACI_RESIDUAL_LOGIT).to(dtype=routed_cls.dtype)
             return selector_cls + residual_scale * (
                 routed_cls - original_cls)
         return self._concat_cls(
@@ -679,10 +681,10 @@ class HTLReID(nn.Module):
             return torch.zeros((), device=reference.device, dtype=reference.dtype)
         return self.HS.regularization_loss(reference)
 
-    def _facr_regularization(self, reference):
-        if not self.use_facr:
+    def _aci_regularization(self, reference):
+        if not self.use_aci:
             return torch.zeros((), device=reference.device, dtype=reference.dtype)
-        return self.FACR.regularization_loss(reference)
+        return self.ACI.regularization_loss(reference)
 
     def _cross_modal_reconstruction_loss(self, features):
         reference = features[0]
@@ -692,17 +694,17 @@ class HTLReID(nn.Module):
         loss = self.CROSS_MODAL_RECON(features)
         return self.cross_modal_recon_loss_weight * loss
 
-    def _log_facr_statistics(self, writer, epoch):
-        if (not self.use_facr or writer is None or epoch is None or
-                self._last_facr_stats_epoch == int(epoch)):
+    def _log_aci_statistics(self, writer, epoch):
+        if (not self.use_aci or writer is None or epoch is None or
+                self._last_aci_stats_epoch == int(epoch)):
             return
-        for name, value in self.FACR.route_statistics().items():
-            writer.add_scalar('FACR/{}'.format(name), value.item(), epoch)
-        if self.facr_residual_fusion:
+        for name, value in self.ACI.route_statistics().items():
+            writer.add_scalar('ACI/{}'.format(name), value.item(), epoch)
+        if self.aci_residual_fusion:
             writer.add_scalar(
-                'FACR/residual_scale',
-                torch.sigmoid(self.FACR_RESIDUAL_LOGIT).item(), epoch)
-        self._last_facr_stats_epoch = int(epoch)
+                'ACI/residual_scale',
+                torch.sigmoid(self.ACI_RESIDUAL_LOGIT).item(), epoch)
+        self._last_aci_stats_epoch = int(epoch)
 
     def _apply_modality_dropout(self, rgb, nir, tir=None, return_keep=False):
         if (not self.training) or self.modality_drop_prob <= 0:
@@ -804,7 +806,7 @@ class HTLReID(nn.Module):
 
     def _test_descriptor(self, cls4t, rgb_feat, nir_feat, tir_feat,
                          quality_scores=None, masks=None,
-                         decoupled_moe_feat=None, isolated_facr_feat=None):
+                         decoupled_moe_feat=None, isolated_aci_feat=None):
         original_cls = torch.cat([
             rgb_feat[:, 0, :], nir_feat[:, 0, :], tir_feat[:, 0, :]
         ], dim=-1)
@@ -814,22 +816,22 @@ class HTLReID(nn.Module):
             if decoupled_moe_feat is None:
                 raise RuntimeError('decoupled MoE test feature requested but branch is disabled')
             return decoupled_moe_feat
-        if self.test_facr_isolated_feat == 'only':
-            if isolated_facr_feat is None:
+        if self.test_aci_isolated_feat == 'only':
+            if isolated_aci_feat is None:
                 raise RuntimeError(
-                    'isolated FACR test feature requested but branch is disabled')
-            return isolated_facr_feat
+                    'isolated ACI test feature requested but branch is disabled')
+            return isolated_aci_feat
 
         use_part = self.test_part_feat != 'off' and self.use_part
         use_original = self.test_original_cls_feat == 'concat'
         use_decoupled_moe = (
             self.test_decoupled_moe_feat == 'concat' and
             decoupled_moe_feat is not None)
-        use_isolated_facr = (
-            self.test_facr_isolated_feat == 'concat' and
-            isolated_facr_feat is not None)
+        use_isolated_aci = (
+            self.test_aci_isolated_feat == 'concat' and
+            isolated_aci_feat is not None)
         if (not use_part and not use_original and not use_decoupled_moe and
-                not use_isolated_facr):
+                not use_isolated_aci):
             return cls4t
 
         descriptors = [F.normalize(cls4t, dim=-1)]
@@ -843,10 +845,10 @@ class HTLReID(nn.Module):
                 F.normalize(decoupled_moe_feat, dim=-1) *
                 self.test_decoupled_moe_feat_weight)
 
-        if use_isolated_facr:
+        if use_isolated_aci:
             descriptors.append(
-                F.normalize(isolated_facr_feat, dim=-1) *
-                self.test_facr_isolated_feat_weight)
+                F.normalize(isolated_aci_feat, dim=-1) *
+                self.test_aci_isolated_feat_weight)
 
         if use_part:
             part_feat = self._part_feature(
@@ -860,10 +862,10 @@ class HTLReID(nn.Module):
     def _test_descriptor_components(self, cls4t, rgb_feat, nir_feat,
                                     tir_feat, quality_scores=None,
                                     masks=None, decoupled_moe_feat=None,
-                                    isolated_facr_feat=None):
+                                    isolated_aci_feat=None):
         """Return raw descriptor blocks for one-pass evaluation sweeps."""
         components = {
-            'facr': cls4t,
+            'aci': cls4t,
             'original': torch.cat([
                 rgb_feat[:, 0, :], nir_feat[:, 0, :], tir_feat[:, 0, :]
             ], dim=-1),
@@ -873,8 +875,8 @@ class HTLReID(nn.Module):
                 rgb_feat, nir_feat, tir_feat, quality_scores, masks)
         if decoupled_moe_feat is not None:
             components['moe'] = decoupled_moe_feat
-        if isolated_facr_feat is not None:
-            components['isolated_facr'] = isolated_facr_feat
+        if isolated_aci_feat is not None:
+            components['isolated_aci'] = isolated_aci_feat
         return components
 
     def _hetero_triplet_loss(self, cls_list, labels, has_tir=True):
@@ -1052,31 +1054,31 @@ class HTLReID(nn.Module):
                 TIR_feat=TIR_feat, TIR_attn=TIR_attn,
                 img_path=img_path, epoch=epoch, writer=writer,
                 mask_fre=mask_fre, quality_scores=quality_scores,
-                return_scores=self.use_facr and self.facr_use_scores,
-                return_gates=self.use_facr and self.facr_use_masks)
+                return_scores=self.use_aci and self.aci_use_scores,
+                return_gates=self.use_aci and self.aci_use_masks)
             RGB_feat_s, NIR_feat_s, TIR_feat_s, mask = selection[:4]
             selection_idx = 4
             hs_scores = None
             hs_gates = None
-            facr_residual_tokens = None
-            if self.use_facr and self.facr_use_scores:
+            aci_residual_tokens = None
+            if self.use_aci and self.aci_use_scores:
                 hs_scores = selection[selection_idx]
                 selection_idx += 1
-            if self.use_facr and self.facr_use_masks:
+            if self.use_aci and self.aci_use_masks:
                 hs_gates = selection[selection_idx]
                 selection_idx += 1
             if self.hs_residual_token:
-                facr_residual_tokens = selection[selection_idx]
+                aci_residual_tokens = selection[selection_idx]
 
             fusion_output = self._fusion_cls(
                 (RGB_feat, NIR_feat, TIR_feat),
                 (RGB_feat_s, NIR_feat_s, TIR_feat_s),
                 quality_scores=quality_scores, masks=mask,
-                hs_scores=hs_scores, facr_masks=hs_gates,
-                facr_residual_tokens=facr_residual_tokens)
-            isolated_facr_feat = None
-            if self.facr_isolated_branch:
-                cls4t, isolated_facr_feat = fusion_output
+                hs_scores=hs_scores, aci_masks=hs_gates,
+                aci_residual_tokens=aci_residual_tokens)
+            isolated_aci_feat = None
+            if self.aci_isolated_branch:
+                cls4t, isolated_aci_feat = fusion_output
             else:
                 cls4t = fusion_output
             if self.use_ocfr:
@@ -1091,14 +1093,14 @@ class HTLReID(nn.Module):
                 has_tir=True, labels=label)
             loss_aux = loss_aux + self._quality_dropout_loss(quality_scores, keep_mask)
             loss_aux = loss_aux + self._selector_regularization(RGB_feat)
-            loss_aux = loss_aux + self._facr_regularization(RGB_feat)
+            loss_aux = loss_aux + self._aci_regularization(RGB_feat)
             loss_aux = loss_aux + self._cross_modal_reconstruction_loss(
                 (RGB_feat, NIR_feat, TIR_feat))
-            self._log_facr_statistics(writer, epoch)
+            self._log_aci_statistics(writer, epoch)
             score = self.FUSE_HEAD(self.FUSE_BN(cls4t))
-            if self.facr_isolated_branch:
-                isolated_facr_score = self.FACR_ISOLATED_HEAD(
-                    self.FACR_ISOLATED_BN(isolated_facr_feat))
+            if self.aci_isolated_branch:
+                isolated_aci_score = self.ACI_ISOLATED_HEAD(
+                    self.ACI_ISOLATED_BN(isolated_aci_feat))
             if self.use_decoupled_moe:
                 decoupled_moe_feat = self.DECOUPLED_MOE(
                     RGB_feat, NIR_feat, TIR_feat)
@@ -1109,8 +1111,8 @@ class HTLReID(nn.Module):
                 part_score = self.PART_HEAD(self.PART_BN(part_feat))
             if self.AL:
                 output = [score, cls4t]
-                if self.facr_isolated_branch:
-                    output += [isolated_facr_score, isolated_facr_feat]
+                if self.aci_isolated_branch:
+                    output += [isolated_aci_score, isolated_aci_feat]
                 if self.use_decoupled_moe:
                     output += [decoupled_moe_score, decoupled_moe_feat]
                 output += [ori_score, ori]
@@ -1120,8 +1122,8 @@ class HTLReID(nn.Module):
                 return tuple(output)
             else:
                 output = [score, cls4t]
-                if self.facr_isolated_branch:
-                    output += [isolated_facr_score, isolated_facr_feat]
+                if self.aci_isolated_branch:
+                    output += [isolated_aci_score, isolated_aci_feat]
                 if self.use_decoupled_moe:
                     output += [decoupled_moe_score, decoupled_moe_feat]
                 output += [
@@ -1150,31 +1152,31 @@ class HTLReID(nn.Module):
                 TIR_feat=TIR_feat, TIR_attn=TIR_attn,
                 img_path=img_path, epoch=epoch, writer=writer,
                 mask_fre=mask_fre, quality_scores=quality_scores,
-                return_scores=self.use_facr and self.facr_use_scores,
-                return_gates=self.use_facr and self.facr_use_masks)
+                return_scores=self.use_aci and self.aci_use_scores,
+                return_gates=self.use_aci and self.aci_use_masks)
             RGB_feat_s, NIR_feat_s, TIR_feat_s, mask = selection[:4]
             selection_idx = 4
             hs_scores = None
             hs_gates = None
-            facr_residual_tokens = None
-            if self.use_facr and self.facr_use_scores:
+            aci_residual_tokens = None
+            if self.use_aci and self.aci_use_scores:
                 hs_scores = selection[selection_idx]
                 selection_idx += 1
-            if self.use_facr and self.facr_use_masks:
+            if self.use_aci and self.aci_use_masks:
                 hs_gates = selection[selection_idx]
                 selection_idx += 1
             if self.hs_residual_token:
-                facr_residual_tokens = selection[selection_idx]
+                aci_residual_tokens = selection[selection_idx]
 
             fusion_output = self._fusion_cls(
                 (RGB_feat, NIR_feat, TIR_feat),
                 (RGB_feat_s, NIR_feat_s, TIR_feat_s),
                 quality_scores=quality_scores, masks=mask,
-                hs_scores=hs_scores, facr_masks=hs_gates,
-                facr_residual_tokens=facr_residual_tokens)
-            isolated_facr_feat = None
-            if self.facr_isolated_branch:
-                cls4t, isolated_facr_feat = fusion_output
+                hs_scores=hs_scores, aci_masks=hs_gates,
+                aci_residual_tokens=aci_residual_tokens)
+            isolated_aci_feat = None
+            if self.aci_isolated_branch:
+                cls4t, isolated_aci_feat = fusion_output
             else:
                 cls4t = fusion_output
             decoupled_moe_feat = None
@@ -1186,18 +1188,18 @@ class HTLReID(nn.Module):
                     cls4t, RGB_feat_s, NIR_feat_s, TIR_feat_s,
                     quality_scores, masks=mask,
                     decoupled_moe_feat=decoupled_moe_feat,
-                    isolated_facr_feat=isolated_facr_feat)
+                    isolated_aci_feat=isolated_aci_feat)
             return self._test_descriptor(cls4t, RGB_feat_s, NIR_feat_s, TIR_feat_s,
                                          quality_scores, masks=mask,
                                          decoupled_moe_feat=decoupled_moe_feat,
-                                         isolated_facr_feat=isolated_facr_feat)
+                                         isolated_aci_feat=isolated_aci_feat)
 
     def forward_two_modalities(self, x, cam_label=None, label=None, view_label=None, cross_type=None, img_path=None,
                                mode=1,
                                writer=None, epoch=None):
         # This forward function is used for the two modalities datasets like RGBN300
-        if self.use_facr:
-            raise ValueError('FACR currently requires RGB/NIR/TIR input')
+        if self.use_aci:
+            raise ValueError('ACI currently requires RGB/NIR/TIR input')
         if self.training:
             RGB = x['RGB']
             NIR = x['NI']

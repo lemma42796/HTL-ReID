@@ -15,9 +15,9 @@ CHAIN_NAME = "E053_E054_corrected_A2_A3"
 A1_MAP = 68.10
 A1_RANK1 = 69.02
 ROWS = (
-    ("E053", "A2-FACR-RESIDUAL",
-     "configs/RGBNT201/ablations/t14_chain/a2_facr_residual.yml",
-     "E053_A2_facr_residual_RGBNT201_seed1111"),
+    ("E053", "A2-ACI-RESIDUAL",
+     "configs/RGBNT201/ablations/t14_chain/a2_aci_residual.yml",
+     "E053_A2_aci_residual_RGBNT201_seed1111"),
     ("E054", "A3-PART-RESIDUAL",
      "configs/RGBNT201/ablations/t14_chain/a3_part_residual.yml",
      "E054_A3_part_residual_RGBNT201_seed1111"),

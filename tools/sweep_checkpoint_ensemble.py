@@ -27,7 +27,7 @@ from tools.sweep_descriptor_weights import extract_components
 from utils.metrics import eval_func
 
 
-COMPONENT_NAMES = ('facr', 'original', 'moe')
+COMPONENT_NAMES = ('aci', 'original', 'moe')
 
 
 def set_seed(seed):
@@ -75,7 +75,7 @@ def component_distances(components, num_query):
 
 def combine_distances(distances, cls_weight, moe_weight):
     return (
-        distances['facr'] +
+        distances['aci'] +
         (float(cls_weight) ** 2) * distances['original'] +
         (float(moe_weight) ** 2) * distances['moe']
     )
@@ -121,7 +121,7 @@ def search(model_name, original, flipped, pids, camids, num_query,
                 'stage': stage,
                 'flip_alpha': float(alpha),
                 'weights': {
-                    'facr': 1.0,
+                    'aci': 1.0,
                     'original': float(cls_weight),
                     'part': 0.0,
                     'moe': float(moe_weight),
@@ -229,7 +229,7 @@ def main():
               not np.array_equal(camids, model_camids)):
             raise RuntimeError('validation order changed between checkpoints')
 
-    if len(pids) != cache['epoch31_rank1'][0]['facr'].size(0):
+    if len(pids) != cache['epoch31_rank1'][0]['aci'].size(0):
         raise RuntimeError('feature and label counts differ')
 
     coarse_alpha = (0.0, 0.25, 0.5, 0.75, 1.0)

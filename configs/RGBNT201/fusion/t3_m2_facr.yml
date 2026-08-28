@@ -3,18 +3,18 @@
 MODEL:
   HS_ENABLED: 1
   QUALITY_AWARE: 0
-  # FACR directly consumes dense scores and complete tokens; legacy selected
+  # ACI directly consumes dense scores and complete tokens; legacy selected
   # patch mean blending is disabled to avoid a second fusion mechanism.
   SELECTED_PATCH_BLEND_WEIGHT: 0.0
-  FACR: 1
-  FACR_USE_SCORES: 1
-  FACR_NUM_HEADS: 12
-  FACR_STEPS: 3
+  ACI: 1
+  ACI_USE_SCORES: 1
+  ACI_NUM_HEADS: 12
+  ACI_STEPS: 3
   # Zero-initialized learnable gain, bounded to +/-0.25. T3 therefore starts
   # exactly from T2 instead of imposing the former 20x log-score prior.
-  FACR_SCORE_BIAS_SCALE: 0.25
-  FACR_SCORE_FLOOR: 0.05
+  ACI_SCORE_BIAS_SCALE: 0.25
+  ACI_SCORE_FLOOR: 0.05
   # End-to-end score learning is required because the legacy 0.15 descriptor
   # branch is disabled; detaching here would leave FACSS alpha untrained.
-  FACR_DETACH_SCORES: 0
-  FACR_GATE_INIT_BIAS: 0.0
+  ACI_DETACH_SCORES: 0
+  ACI_GATE_INIT_BIAS: 0.0
