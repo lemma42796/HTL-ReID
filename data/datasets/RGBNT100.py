@@ -6,22 +6,20 @@
 
 import glob
 import re
-import pdb
 import os.path as osp
-import numpy as np
 from .bases import BaseImageDataset
 
 
 class RGBNT100(BaseImageDataset):
     """
-    Market1501
+    RGBNT100 multi-spectral vehicle ReID dataset.
+
     Reference:
-    Zheng et al. Scalable Person Re-identification: A Benchmark. ICCV 2015.
-    URL: http://www.liangzheng.org/Project/project_reid.html
+    Li et al. Multi-Spectral Vehicle Re-Identification: A Challenge. AAAI 2020.
 
     Dataset statistics:
-    # identities: 1501 (+1 for background)
-    # images: 12936 (train) + 3368 (query) + 15913 (gallery)
+    # identities: 50 train + 50 test
+    # image triples: 8675 train + 1715 query + 8575 gallery
     """
     dataset_dir = 'RGBNT100/rgbir'
 
@@ -37,9 +35,8 @@ class RGBNT100(BaseImageDataset):
         train = self._process_dir(self.train_dir, relabel=True)
         query = self._process_dir(self.query_dir, relabel=False)
         gallery = self._process_dir(self.gallery_dir, relabel=False)
-        #pdb.set_trace()
         if verbose:
-            print("=> RGB_IR loaded")
+            print("=> RGBNT100 loaded")
             self.print_dataset_statistics(train, query, gallery)
 
         self.train = train
@@ -49,8 +46,6 @@ class RGBNT100(BaseImageDataset):
         self.num_train_pids, self.num_train_imgs, self.num_train_cams,self.num_train_vids = self.get_imagedata_info(self.train)
         self.num_query_pids, self.num_query_imgs, self.num_query_cams,self.num_query_vids = self.get_imagedata_info(self.query)
         self.num_gallery_pids, self.num_gallery_imgs, self.num_gallery_cams,self.num_gallery_vids = self.get_imagedata_info(self.gallery)
-        #pdb.set_trace()
-
     def _check_before_run(self):
         """Check if all files are available before going deeper"""
         if not osp.exists(self.dataset_dir):
@@ -63,7 +58,7 @@ class RGBNT100(BaseImageDataset):
             raise RuntimeError("'{}' is not available".format(self.gallery_dir))
 
     def _process_dir(self, dir_path, relabel=False):
-        img_paths = glob.glob(osp.join(dir_path, '*.jpg'))
+        img_paths = sorted(glob.glob(osp.join(dir_path, '*.jpg')))
         pattern = re.compile(r'([-\d]+)_c([-\d]+)')
 
         pid_container = set()
@@ -71,13 +66,13 @@ class RGBNT100(BaseImageDataset):
             pid, _ = map(int, pattern.search(img_path).groups())
             if pid == -1: continue  # junk images are just ignored
             pid_container.add(pid)
-        pid2label = {pid: label for label, pid in enumerate(pid_container)}
+        pid2label = {
+            pid: label for label, pid in enumerate(sorted(pid_container))
+        }
 
         dataset = []
         for img_path in img_paths:
             pid, camid = map(int, pattern.search(img_path).groups())
-            #pdb.set_trace()
-            #if pid == -1: continue  # junk images are just ignored
             assert 1 <= pid <= 600  # pid == 0 means background
             assert 1 <= camid <= 8
             trackid = -1
