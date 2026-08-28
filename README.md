@@ -1,144 +1,105 @@
 # HTL-ReID
 
-## Project documentation
+**Hierarchical Token Learning with Dynamic Heterogeneous Fusion for Multi-Modal Object Re-Identification**
 
-- [Project status and TODO](项目状态与TODO.md)
-- [Paper revision plan](论文大修执行方案.md)
-- [Experiment index](实验记录.md)
-- [Reproducible experiment records](实验记录/)
+HTL-ReID is a Transformer-based framework for multi-modal object re-identification. It learns complementary representations from visible (RGB), near-infrared (NIR), and thermal infrared (TIR) images through hierarchical token selection and adaptive feature fusion.
 
-HTL-ReID is a research codebase for robust multi-modal object re-identification
-with RGB / NIR / TIR inputs.
+## Highlights
 
-## Mainline
+- Hierarchical selection of informative cross-spectral tokens.
+- Adaptive interaction between RGB, NIR, and TIR representations.
+- Global and part-aware descriptors for fine-grained matching.
+- Dynamic fusion of single-modal, bi-modal, and tri-modal routes.
+- Support for RGBNT201, RGBNT100, and MSVR310.
 
-The frozen paper-facing module names are HS, ACI, PLR, and DHF. PLR means
-Part-aware Local Representation and maps to the existing Part branch; DHF
-means Dynamic Heterogeneous Fusion and maps to the existing
-`DecoupledMoEFusion` implementation. These paper-facing names do not rename
-the code, configuration keys, or frozen checkpoints.
+## Method
 
-The older controlled RGBNT201 rows M0-M3 retain their historical FACSS/QAWF
-labels as experiment evidence; they are not the naming scheme for the frozen
-final model.
+HTL-ReID contains four main components:
 
-Inference-only paper visualizations and their provenance are documented in
-[`paper_figures/visual_analysis`](paper_figures/visual_analysis/README.md).
+- **HS — Hierarchical Token Selection:** combines multi-layer attention cues with frequency-aware masks to retain informative tokens.
+- **ACI — Adaptive Cross-modal Interaction:** exchanges complementary evidence between modalities using sample-adaptive routing.
+- **PLR — Part-aware Local Representation:** captures local discriminative patterns from horizontal regions.
+- **DHF — Dynamic Heterogeneous Fusion:** aggregates single-modal, pairwise, and tri-modal routes with dynamic gates.
 
-The shared protocol is `configs/RGBNT201/paper/base.yml`; merge exactly one of
-`m0.yml` through `m3.yml` from the same directory. The older A0-A5 chain20
-overlays are archived diagnostic configurations, not formal paper configs.
+The final retrieval descriptor combines the cross-modal representation with global and dynamically fused features.
 
-The old AGF-wrapped TPM path remains archived negative evidence; the legacy
-TPM, AGF, and HS_FACSS modules have been removed from the codebase (old
-checkpoints keep loading through key migration). The ACI (Adaptive
-Cross-modal Interaction) fusion extension and its historical fusion overlays
-live under `configs/RGBNT201/fusion`; they do not change the completed M0-M3
-results. Modality adapters, part branches, and auxiliary loss/full branches
-are not the current paper-method path. HSL is not part of this model path.
+## Results
 
-## Cross-modal fusion extension
+Representative performance on RGBNT201 without re-ranking:
 
-Merge the frozen paper base with exactly one fusion overlay:
+| Dataset | mAP | Rank-1 |
+|---|---:|---:|
+| RGBNT201 | 77.71% | 82.66% |
 
-- `t1_tpm.yml`: archived TOP-ReID TPM reproduction row (module removed;
-  reproducing it requires a historical commit).
-- `t2_adaptive_routing.yml`: adaptive all-connected interaction without
-  selector guidance.
-- `t3_m2_facr.yml`: dense selector scores softly guide adaptive interaction.
-
-ACI directly produces the supervised 3D descriptor. It does not use the
-legacy AGF wrapper, hard-pruned fusion input, or a `0.15` auxiliary concat.
-
-## Requirements
+## Installation
 
 ```bash
 pip install -r requirements.txt
 ```
 
-`pytorch_wavelets` is vendored under `./pytorch_wavelets`; do not install it
-separately.
+The project uses PyTorch and a ViT-B/16 backbone. `pytorch_wavelets` is included in the repository and does not need to be installed separately.
 
-Set `DATASETS.ROOT_DIR` and `MODEL.PRETRAIN_PATH_T` in the dataset config, or
-override them from the command line.
+## Data Preparation
+
+Set `DATASETS.ROOT_DIR` to a directory containing the target datasets:
+
+```text
+datasets/
+├── RGBNT201/
+│   ├── train_171/
+│   └── test/
+├── RGBNT100/
+│   └── rgbir/
+└── MSVR310/
+    ├── bounding_box_train/
+    ├── query3/
+    └── bounding_box_test/
+```
+
+Each dataset should follow its official RGB/NIR/TIR organization.
 
 ## Training
 
+Configuration files can be chained from left to right. Select the dataset base and matching HTL-ReID fusion configuration under `configs/`:
+
 ```bash
-python train_net.py --config_file configs/RGBNT201/paper/base.yml \
-    --config_file configs/RGBNT201/paper/m2.yml \
-    DATASETS.ROOT_DIR /path/to/datasets \
-    MODEL.PRETRAIN_PATH_T /path/to/pretrained_vit.pth
+python train_net.py \
+  --config_file /path/to/base.yml \
+  --config_file /path/to/fusion.yml \
+  DATASETS.ROOT_DIR /path/to/datasets \
+  MODEL.PRETRAIN_PATH_T /path/to/vit_base_patch16_224.pth \
+  OUTPUT_DIR /path/to/output
 ```
 
-The controlled paper protocol trains for 20 epochs while retaining the
-120-epoch cosine-schedule horizon. It uses batch size 40, seed 1111, disables
-periodic checkpoints while retaining the best checkpoint, and must be launched
-with a 30-minute wall-clock timeout.
+Dataset-specific configurations for RGBNT100 and MSVR310 are provided under `configs/`.
 
 ## Evaluation
 
 ```bash
-python test_net.py --config_file configs/RGBNT201/paper/base.yml \
-    --config_file configs/RGBNT201/paper/m2.yml \
-    TEST.WEIGHT /path/to/checkpoint.pth
+python test_net.py \
+  --config_file /path/to/base.yml \
+  --config_file /path/to/fusion.yml \
+  --config_file /path/to/evaluation.yml \
+  DATASETS.ROOT_DIR /path/to/datasets \
+  TEST.WEIGHT /path/to/checkpoint.pth
 ```
 
-The paper configs explicitly disable re-ranking for the main results.
+The main evaluation protocol disables re-ranking. Descriptor analysis and evaluation utilities are available under `tools/`.
 
-## Legacy-style A2 comparison
+## Project Structure
 
-The current implementation can also reproduce the old A2 module combination:
-HS token selection + quality weighting + quality-aware frequency selection.
-This is a comparison with the old code path, not a fifth paper ablation row.
-Merge the legacy overlay after the frozen paper base:
-
-```bash
-timeout --signal=TERM --kill-after=10s 30m \
-  /root/miniconda3/bin/python train_net.py \
-  --config_file configs/RGBNT201/paper/base.yml \
-  --config_file configs/RGBNT201/legacy/a2_quality_frequency.yml \
-  OUTPUT_DIR /root/autodl-tmp/outputs/HTL-ReID/E005_L1_legacy_a2_seed1111
+```text
+HTL-ReID/
+├── configs/          # dataset and experiment configurations
+├── data/             # datasets, samplers, and data loaders
+├── modeling/         # backbone and HTL-ReID modules
+├── layers/           # training objectives
+├── engine/           # training and inference loops
+├── tools/            # experiment and visualization utilities
+├── train_net.py      # training entry point
+└── test_net.py       # evaluation entry point
 ```
-
-This uses RGBNT201, seed 1111, batch size 40, and 20 epochs. The base config
-keeps re-ranking off, so evaluate the saved best checkpoint once with the same
-two configs for the primary comparison. For a separately labeled old-protocol
-number, append
-`--config_file configs/RGBNT201/legacy/eval_rerank.yml` to the evaluation
-command. Both evaluations reuse the same checkpoint; do not retrain.
-
-## Remaining controlled rows
-
-After E001/M0 has completed, run M1-M3 sequentially with independent
-initialization and a separate 30-minute cap per row:
-
-```bash
-python tools/run_rgbnt201_paper_remaining.py
-```
-
-Use `--dry-run` to inspect the experiment IDs, configs, output directories,
-epoch count, seed, and timeout without creating artifacts or starting training.
-
-## Smoke Test
-
-For the new fusion rows, use the CUDA-only smoke test (it intentionally has no
-CPU fallback):
-
-```bash
-python tools/smoke_fusion_gpu.py
-```
-
-The broader legacy/paper regression suite remains available separately:
-
-```bash
-python test_pipeline.py
-```
-
-The smoke test checks config merging, scheduler semantics, 3-modal and 2-modal
-forward/backward passes, save/load, the HS selector modes, all four paper
-rows, and the legacy-style quality-aware frequency path without real datasets.
 
 ## License
 
-This project is released under the terms of the [LICENSE](LICENSE) file in this repository.
+This project is released under the terms of the [LICENSE](LICENSE) file.
