@@ -119,6 +119,10 @@ _C.MODEL.FACR_GATE_INIT_BIAS = 0.0
 # enabled by a row config.
 _C.MODEL.FACR_RESIDUAL_FUSION = 0
 _C.MODEL.FACR_RESIDUAL_SCALE_INIT = 0.1
+# Train FACR as an auxiliary branch from detached backbone tokens so its loss
+# cannot alter the selector/main branch. The routed descriptor is supervised by
+# its own BNNeck and classifier and can be concatenated only at test time.
+_C.MODEL.FACR_ISOLATED_BRANCH = 0
 # Optional own-modality masked aggregation before collaborative FACR stages.
 # This follows the independent-before-collaborative ordering investigated by
 # T11 while leaving every existing FACR configuration unchanged by default.
@@ -350,6 +354,8 @@ _C.TEST.ORIGINAL_CLS_FEAT = 'off'
 _C.TEST.ORIGINAL_CLS_FEAT_WEIGHT = 0.5
 _C.TEST.DECOUPLED_MOE_FEAT = 'off'
 _C.TEST.DECOUPLED_MOE_FEAT_WEIGHT = 0.5
+_C.TEST.FACR_ISOLATED_FEAT = 'off'
+_C.TEST.FACR_ISOLATED_FEAT_WEIGHT = 0.25
 # ----------------------------------------------------------a------------------ #
 # Misc options
 # ---------------------------------------------------------------------------- #

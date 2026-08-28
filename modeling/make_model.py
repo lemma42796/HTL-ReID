@@ -289,6 +289,8 @@ class HTLReID(nn.Module):
             cfg.MODEL.FACR_RESIDUAL_FUSION)
         self.facr_residual_scale_init = float(
             cfg.MODEL.FACR_RESIDUAL_SCALE_INIT)
+        self.facr_isolated_branch = bool(
+            cfg.MODEL.FACR_ISOLATED_BRANCH)
         self.facr_independent_aggregation = bool(
             cfg.MODEL.FACR_INDEPENDENT_AGG)
         self.facr_self_refine = bool(cfg.MODEL.FACR_SELF_REFINE)
@@ -309,6 +311,11 @@ class HTLReID(nn.Module):
             raise ValueError('FACR_USE_MASKS requires FACSS or SFTS')
         if self.facr_residual_fusion and not self.use_facr:
             raise ValueError('FACR_RESIDUAL_FUSION requires FACR')
+        if self.facr_isolated_branch and not self.use_facr:
+            raise ValueError('FACR_ISOLATED_BRANCH requires FACR')
+        if self.facr_isolated_branch and self.facr_residual_fusion:
+            raise ValueError(
+                'FACR_ISOLATED_BRANCH and FACR_RESIDUAL_FUSION are mutually exclusive')
         if self.facr_residual_fusion and not (
                 0.0 < self.facr_residual_scale_init < 1.0):
             raise ValueError(
@@ -376,6 +383,18 @@ class HTLReID(nn.Module):
                 "TEST.DECOUPLED_MOE_FEAT must be 'off', 'concat', or 'only'")
         if self.test_decoupled_moe_feat_weight < 0.0:
             raise ValueError('TEST.DECOUPLED_MOE_FEAT_WEIGHT must be non-negative')
+        self.test_facr_isolated_feat = cfg.TEST.FACR_ISOLATED_FEAT.lower()
+        self.test_facr_isolated_feat_weight = float(
+            cfg.TEST.FACR_ISOLATED_FEAT_WEIGHT)
+        if self.test_facr_isolated_feat not in ('off', 'concat', 'only'):
+            raise ValueError(
+                "TEST.FACR_ISOLATED_FEAT must be 'off', 'concat', or 'only'")
+        if self.test_facr_isolated_feat != 'off' and not self.facr_isolated_branch:
+            raise ValueError(
+                'TEST.FACR_ISOLATED_FEAT requires FACR_ISOLATED_BRANCH')
+        if self.test_facr_isolated_feat_weight < 0.0:
+            raise ValueError(
+                'TEST.FACR_ISOLATED_FEAT_WEIGHT must be non-negative')
 
         self.selected_patch_blend_weight = float(cfg.MODEL.SELECTED_PATCH_BLEND_WEIGHT)
         self.selected_patch_context = cfg.MODEL.SELECTED_PATCH_CONTEXT.lower()
@@ -413,20 +432,34 @@ class HTLReID(nn.Module):
                 num_heads=cfg.MODEL.TPM_NUM_HEADS,
             )
         if self.use_facr:
-            self.FACR = FACR(
-                dim=self.BACKBONE.token_dim,
-                num_heads=cfg.MODEL.FACR_NUM_HEADS,
-                steps=cfg.MODEL.FACR_STEPS,
-                score_bias_scale=(cfg.MODEL.FACR_SCORE_BIAS_SCALE
-                                  if self.facr_use_scores else 0.0),
-                score_floor=cfg.MODEL.FACR_SCORE_FLOOR,
-                detach_scores=bool(cfg.MODEL.FACR_DETACH_SCORES),
-                gate_init_bias=cfg.MODEL.FACR_GATE_INIT_BIAS,
-                route_balance_weight=cfg.MODEL.FACR_ROUTE_BALANCE_WEIGHT,
-                self_refine=self.facr_self_refine,
-                self_refine_scale_init=cfg.MODEL.FACR_SELF_REFINE_SCALE_INIT,
-                independent_aggregation=self.facr_independent_aggregation,
-            )
+            def build_facr():
+                return FACR(
+                    dim=self.BACKBONE.token_dim,
+                    num_heads=cfg.MODEL.FACR_NUM_HEADS,
+                    steps=cfg.MODEL.FACR_STEPS,
+                    score_bias_scale=(cfg.MODEL.FACR_SCORE_BIAS_SCALE
+                                      if self.facr_use_scores else 0.0),
+                    score_floor=cfg.MODEL.FACR_SCORE_FLOOR,
+                    detach_scores=bool(cfg.MODEL.FACR_DETACH_SCORES),
+                    gate_init_bias=cfg.MODEL.FACR_GATE_INIT_BIAS,
+                    route_balance_weight=cfg.MODEL.FACR_ROUTE_BALANCE_WEIGHT,
+                    self_refine=self.facr_self_refine,
+                    self_refine_scale_init=cfg.MODEL.FACR_SELF_REFINE_SCALE_INIT,
+                    independent_aggregation=self.facr_independent_aggregation,
+                )
+
+            if self.facr_isolated_branch:
+                # Keep every later A1 head on the same initialization stream;
+                # FACR gets a deterministic, independent CPU RNG stream.
+                rng_state = torch.random.get_rng_state()
+                try:
+                    torch.random.default_generator.manual_seed(
+                        int(cfg.SOLVER.SEED) + 5500)
+                    self.FACR = build_facr()
+                finally:
+                    torch.random.set_rng_state(rng_state)
+            else:
+                self.FACR = build_facr()
             if self.facr_residual_fusion:
                 initial_scale = torch.tensor(
                     self.facr_residual_scale_init, dtype=torch.float32)
@@ -543,6 +576,12 @@ class HTLReID(nn.Module):
             self.PART_BN = nn.BatchNorm1d(part_dim)
             self.PART_HEAD = nn.Linear(part_dim, num_classes, bias=False)
             self.PART_HEAD.apply(weights_init_classifier)
+        if self.facr_isolated_branch:
+            self.FACR_ISOLATED_BN = nn.BatchNorm1d(
+                3 * self.BACKBONE.token_dim)
+            self.FACR_ISOLATED_HEAD = nn.Linear(
+                3 * self.BACKBONE.token_dim, num_classes, bias=False)
+            self.FACR_ISOLATED_HEAD.apply(weights_init_classifier)
 
     @staticmethod
     def _prepare_patch_mask(patches, mask=None):
@@ -659,10 +698,25 @@ class HTLReID(nn.Module):
         if self.use_facr:
             scores = facss_scores if self.facr_use_scores else None
             facr_masks = facr_masks if self.facr_use_masks else None
+            facr_inputs = full_feats
+            if self.facr_isolated_branch:
+                facr_inputs = tuple(feature.detach() for feature in full_feats)
+                if scores is not None:
+                    scores = tuple(score.detach() for score in scores)
+                if facr_masks is not None:
+                    facr_masks = tuple(mask.detach() for mask in facr_masks)
+                if facr_residual_tokens is not None:
+                    facr_residual_tokens = tuple(
+                        token.detach() for token in facr_residual_tokens)
             routed_cls = self.FACR(
-                rgb_full, nir_full, tir_full,
+                *facr_inputs,
                 scores=scores, masks=facr_masks,
                 residual_tokens=facr_residual_tokens)
+            if self.facr_isolated_branch:
+                selector_cls = self._concat_cls(
+                    rgb_sel, nir_sel, tir_sel,
+                    quality_scores=quality_scores, masks=masks)
+                return selector_cls, routed_cls
             if not self.facr_residual_fusion:
                 return routed_cls
             selector_cls = self._concat_cls(
@@ -828,7 +882,7 @@ class HTLReID(nn.Module):
 
     def _test_descriptor(self, cls4t, rgb_feat, nir_feat, tir_feat,
                          quality_scores=None, masks=None,
-                         decoupled_moe_feat=None):
+                         decoupled_moe_feat=None, isolated_facr_feat=None):
         original_cls = torch.cat([
             rgb_feat[:, 0, :], nir_feat[:, 0, :], tir_feat[:, 0, :]
         ], dim=-1)
@@ -838,13 +892,22 @@ class HTLReID(nn.Module):
             if decoupled_moe_feat is None:
                 raise RuntimeError('decoupled MoE test feature requested but branch is disabled')
             return decoupled_moe_feat
+        if self.test_facr_isolated_feat == 'only':
+            if isolated_facr_feat is None:
+                raise RuntimeError(
+                    'isolated FACR test feature requested but branch is disabled')
+            return isolated_facr_feat
 
         use_part = self.test_part_feat != 'off' and self.use_part
         use_original = self.test_original_cls_feat == 'concat'
         use_decoupled_moe = (
             self.test_decoupled_moe_feat == 'concat' and
             decoupled_moe_feat is not None)
-        if not use_part and not use_original and not use_decoupled_moe:
+        use_isolated_facr = (
+            self.test_facr_isolated_feat == 'concat' and
+            isolated_facr_feat is not None)
+        if (not use_part and not use_original and not use_decoupled_moe and
+                not use_isolated_facr):
             return cls4t
 
         descriptors = [F.normalize(cls4t, dim=-1)]
@@ -858,6 +921,11 @@ class HTLReID(nn.Module):
                 F.normalize(decoupled_moe_feat, dim=-1) *
                 self.test_decoupled_moe_feat_weight)
 
+        if use_isolated_facr:
+            descriptors.append(
+                F.normalize(isolated_facr_feat, dim=-1) *
+                self.test_facr_isolated_feat_weight)
+
         if use_part:
             part_feat = self._part_feature(
                 rgb_feat, nir_feat, tir_feat, quality_scores, masks)
@@ -869,7 +937,8 @@ class HTLReID(nn.Module):
 
     def _test_descriptor_components(self, cls4t, rgb_feat, nir_feat,
                                     tir_feat, quality_scores=None,
-                                    masks=None, decoupled_moe_feat=None):
+                                    masks=None, decoupled_moe_feat=None,
+                                    isolated_facr_feat=None):
         """Return raw descriptor blocks for one-pass evaluation sweeps."""
         components = {
             'facr': cls4t,
@@ -882,6 +951,8 @@ class HTLReID(nn.Module):
                 rgb_feat, nir_feat, tir_feat, quality_scores, masks)
         if decoupled_moe_feat is not None:
             components['moe'] = decoupled_moe_feat
+        if isolated_facr_feat is not None:
+            components['isolated_facr'] = isolated_facr_feat
         return components
 
     def _hetero_triplet_loss(self, cls_list, labels, has_tir=True):
@@ -1075,12 +1146,17 @@ class HTLReID(nn.Module):
             if self.sfts_residual_token:
                 facr_residual_tokens = selection[selection_idx]
 
-            cls4t = self._fusion_cls(
+            fusion_output = self._fusion_cls(
                 (RGB_feat, NIR_feat, TIR_feat),
                 (RGB_feat_s, NIR_feat_s, TIR_feat_s),
                 quality_scores=quality_scores, masks=mask,
                 facss_scores=facss_scores, facr_masks=facss_gates,
                 facr_residual_tokens=facr_residual_tokens)
+            isolated_facr_feat = None
+            if self.facr_isolated_branch:
+                cls4t, isolated_facr_feat = fusion_output
+            else:
+                cls4t = fusion_output
             if self.use_ocfr:
                 RGB_cls = RGB_feat_s[:, 0, :]
                 NIR_cls = NIR_feat_s[:, 0, :]
@@ -1098,6 +1174,9 @@ class HTLReID(nn.Module):
                 (RGB_feat, NIR_feat, TIR_feat))
             self._log_facr_statistics(writer, epoch)
             score = self.FUSE_HEAD(self.FUSE_BN(cls4t))
+            if self.facr_isolated_branch:
+                isolated_facr_score = self.FACR_ISOLATED_HEAD(
+                    self.FACR_ISOLATED_BN(isolated_facr_feat))
             agf_aux_pairs = self._agf_aux_pairs()
             if self.use_decoupled_moe:
                 decoupled_moe_feat = self.DECOUPLED_MOE(
@@ -1109,6 +1188,8 @@ class HTLReID(nn.Module):
                 part_score = self.PART_HEAD(self.PART_BN(part_feat))
             if self.AL:
                 output = [score, cls4t]
+                if self.facr_isolated_branch:
+                    output += [isolated_facr_score, isolated_facr_feat]
                 if self.use_decoupled_moe:
                     output += [decoupled_moe_score, decoupled_moe_feat]
                 output += agf_aux_pairs + [ori_score, ori]
@@ -1118,6 +1199,8 @@ class HTLReID(nn.Module):
                 return tuple(output)
             else:
                 output = [score, cls4t]
+                if self.facr_isolated_branch:
+                    output += [isolated_facr_score, isolated_facr_feat]
                 if self.use_decoupled_moe:
                     output += [decoupled_moe_score, decoupled_moe_feat]
                 output += agf_aux_pairs + [
@@ -1162,12 +1245,17 @@ class HTLReID(nn.Module):
             if self.sfts_residual_token:
                 facr_residual_tokens = selection[selection_idx]
 
-            cls4t = self._fusion_cls(
+            fusion_output = self._fusion_cls(
                 (RGB_feat, NIR_feat, TIR_feat),
                 (RGB_feat_s, NIR_feat_s, TIR_feat_s),
                 quality_scores=quality_scores, masks=mask,
                 facss_scores=facss_scores, facr_masks=facss_gates,
                 facr_residual_tokens=facr_residual_tokens)
+            isolated_facr_feat = None
+            if self.facr_isolated_branch:
+                cls4t, isolated_facr_feat = fusion_output
+            else:
+                cls4t = fusion_output
             decoupled_moe_feat = None
             if self.use_decoupled_moe:
                 decoupled_moe_feat = self.DECOUPLED_MOE(
@@ -1176,10 +1264,12 @@ class HTLReID(nn.Module):
                 return self._test_descriptor_components(
                     cls4t, RGB_feat_s, NIR_feat_s, TIR_feat_s,
                     quality_scores, masks=mask,
-                    decoupled_moe_feat=decoupled_moe_feat)
+                    decoupled_moe_feat=decoupled_moe_feat,
+                    isolated_facr_feat=isolated_facr_feat)
             return self._test_descriptor(cls4t, RGB_feat_s, NIR_feat_s, TIR_feat_s,
                                          quality_scores, masks=mask,
-                                         decoupled_moe_feat=decoupled_moe_feat)
+                                         decoupled_moe_feat=decoupled_moe_feat,
+                                         isolated_facr_feat=isolated_facr_feat)
 
     def forward_two_modalities(self, x, cam_label=None, label=None, view_label=None, cross_type=None, img_path=None,
                                mode=1,

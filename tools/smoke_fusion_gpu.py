@@ -27,6 +27,7 @@ ROWS = (
     'configs/RGBNT201/fusion/t9_facr_self_refine.yml',
     'configs/RGBNT201/fusion/t10_sfts_k1_residual_facr.yml',
     'configs/RGBNT201/ablations/t14_chain/a2_facr_residual.yml',
+    'configs/RGBNT201/ablations/t14_chain/a2_facr_isolated.yml',
 )
 
 
@@ -50,12 +51,44 @@ def dummy_batch(batch, height, width, device):
 
 def smoke(row, batch, height, width):
     cfg = build_cfg(row, height, width)
+    reference_heads = None
+    if cfg.MODEL.FACR_ISOLATED_BRANCH:
+        torch.manual_seed(1701)
+        reference_cfg = build_cfg(
+            'configs/RGBNT201/ablations/t14_chain/a1_sfts.yml',
+            height, width)
+        reference_model = make_model(reference_cfg, num_class=8, camera_num=0)
+        reference_heads = {
+            name: reference_model.state_dict()[name].clone()
+            for name in ('FUSE_HEAD.weight', 'BACKBONE_HEAD.weight',
+                         'AL_HEAD.weight')
+        }
+        del reference_model
+        torch.manual_seed(1701)
     model = make_model(cfg, num_class=8, camera_num=0).cuda().train()
+    if reference_heads is not None:
+        for name, reference in reference_heads.items():
+            if not torch.equal(model.state_dict()[name].cpu(), reference):
+                raise AssertionError(
+                    '{} changed A1 initialization for {}'.format(row, name))
     inputs = dummy_batch(batch, height, width, torch.device('cuda'))
     labels = torch.randint(0, 8, (batch,), device='cuda')
     output = model(inputs, label=labels, epoch=0)
-    if len(output) != 5:
-        raise AssertionError('{} returned {} values, expected 5'.format(row, len(output)))
+    expected_outputs = 7 if cfg.MODEL.FACR_ISOLATED_BRANCH else 5
+    if len(output) != expected_outputs:
+        raise AssertionError('{} returned {} values, expected {}'.format(
+            row, len(output), expected_outputs))
+    if cfg.MODEL.FACR_ISOLATED_BRANCH:
+        isolated_loss = output[2].float().mean() + output[3].float().mean()
+        isolated_loss.backward(retain_graph=True)
+        backbone_grads = [
+            parameter.grad for name, parameter in model.named_parameters()
+            if name.startswith('BACKBONE.') and parameter.requires_grad
+        ]
+        if any(gradient is not None for gradient in backbone_grads):
+            raise AssertionError(
+                '{} isolated FACR loss reached the backbone'.format(row))
+        model.zero_grad(set_to_none=True)
     loss = sum(value.float().mean() for value in output[:-1]) + output[-1].float()
     loss.backward()
     if not all(torch.isfinite(value).all() for value in output):
@@ -83,6 +116,8 @@ def smoke(row, batch, height, width):
     with torch.no_grad():
         descriptor = model(inputs, epoch=0)
     expected = 3 * model.BACKBONE.token_dim
+    if cfg.TEST.FACR_ISOLATED_FEAT == 'concat':
+        expected *= 2
     if descriptor.shape != (batch, expected):
         raise AssertionError('{} descriptor shape {}'.format(row, descriptor.shape))
     torch.cuda.synchronize()
