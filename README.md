@@ -12,9 +12,18 @@ with RGB / NIR / TIR inputs.
 
 ## Mainline
 
-The paper path is evaluated through four controlled RGBNT201 rows: M0 shared
-ViT-B/16, M1 adds hierarchical token selection (HS), M2 adds FACSS token
-filtering, and M3 adds quality-aware selection/fusion weights (QAWF).
+The frozen paper-facing module names are HS, ACI, PLR, and DHF. PLR means
+Part-aware Local Representation and maps to the existing Part branch; DHF
+means Dynamic Heterogeneous Fusion and maps to the existing
+`DecoupledMoEFusion` implementation. These paper-facing names do not rename
+the code, configuration keys, or frozen checkpoints.
+
+The older controlled RGBNT201 rows M0-M3 retain their historical FACSS/QAWF
+labels as experiment evidence; they are not the naming scheme for the frozen
+final model.
+
+Inference-only paper visualizations and their provenance are documented in
+[`paper_figures/visual_analysis`](paper_figures/visual_analysis/README.md).
 
 The shared protocol is `configs/RGBNT201/paper/base.yml`; merge exactly one of
 `m0.yml` through `m3.yml` from the same directory. The older A0-A5 chain20

@@ -1,0 +1,34 @@
+{
+  "dataset": "RGBNT201",
+  "seed": 1111,
+  "test_batch_size": 64,
+  "re_ranking": false,
+  "num_query": 836,
+  "num_total": 1672,
+  "baseline_checkpoint": "/root/autodl-tmp/outputs/HTL-ReID/E049_A0_backbone_RGBNT201_seed1111/HTL-ReID_best.pth",
+  "full_checkpoint": "/root/autodl-tmp/outputs/HTL-ReID/E043_T14_demo_lite_moe_seed1111/HTL-ReID_best_rank1.pth",
+  "full_inference": {
+    "flip_alpha": 0.9,
+    "weights": {
+      "ACI": 1.0,
+      "CLS": 1.1,
+      "PLR": 0.0,
+      "DHF": 1.58
+    }
+  },
+  "metrics": {
+    "baseline": {
+      "mAP": 65.4738,
+      "Rank1": 67.5837,
+      "Rank5": 80.2632,
+      "Rank10": 85.2871
+    },
+    "full": {
+      "mAP": 77.7123,
+      "Rank1": 82.6555,
+      "Rank5": 89.4737,
+      "Rank10": 91.866
+    }
+  },
+  "elapsed_seconds": 25.94
+}
