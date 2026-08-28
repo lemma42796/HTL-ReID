@@ -1,6 +1,5 @@
 # M1: M0 + Hierarchical Token Selection (HS) only.
 MODEL:
   HS_ENABLED: 1
-  FACSS_ENABLED: 0
   QUALITY_AWARE: 0
   SELECTED_PATCH_BLEND_WEIGHT: 0.15

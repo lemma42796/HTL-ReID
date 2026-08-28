@@ -45,34 +45,23 @@ _C.MODEL.HEAD_KEEP = 1
 _C.MODEL.FREQUENCY_KEEP=10
 _C.MODEL.FREQUENCY_QUALITY_AWARE = 1
 _C.MODEL.FREQUENCY_ENABLED = 1
-# Original EDITOR/Magic Tokens selector. When enabled it replaces HS/FACSS.
-_C.MODEL.SFTS_ENABLED = 0
-_C.MODEL.SFTS_RATIO = 0.5
+# HS (Hierarchical Token Selection): cross-layer attention rollout plus the
+# frequency mask, merged into one shared selection mask. Selection rule from
+# the official EDITOR source.
+_C.MODEL.HS_ENABLED = 0
+_C.MODEL.HS_RATIO = 0.5
 # Learn a dataset-level discrete tokens-per-head K with a straight-through
 # Gumbel-Softmax architecture choice. The final union density is regularized
 # so identification loss cannot trivially collapse the choice to maximum K.
-_C.MODEL.SFTS_LEARNABLE_K = 0
-_C.MODEL.SFTS_K_CANDIDATES = [1, 2, 4, 8, 16]
-_C.MODEL.SFTS_GUMBEL_TAU = 1.0
-_C.MODEL.SFTS_GUMBEL_TAU_MIN = 0.2
-_C.MODEL.SFTS_GUMBEL_TAU_DECAY = 0.9
-_C.MODEL.SFTS_BUDGET_LOSS_WEIGHT = 0.05
+_C.MODEL.HS_LEARNABLE_K = 0
+_C.MODEL.HS_K_CANDIDATES = [1, 2, 4, 8, 16]
+_C.MODEL.HS_GUMBEL_TAU = 1.0
+_C.MODEL.HS_GUMBEL_TAU_MIN = 0.2
+_C.MODEL.HS_GUMBEL_TAU_DECAY = 0.9
+_C.MODEL.HS_BUDGET_LOSS_WEIGHT = 0.05
 # Preserve information outside the shared hard mask as one attention-weighted
 # residual token per modality. Consumed only by FACR final self-refinement.
-_C.MODEL.SFTS_RESIDUAL_TOKEN = 0
-# HS (Hierarchical Token Selection)
-_C.MODEL.HS_ENABLED = 1
-_C.MODEL.HS_LAYERS = [4, 8, 12]
-_C.MODEL.HS_K = 16
-# FACSS (Fusion-Aware Synergistic Selection)
-_C.MODEL.FACSS_ENABLED = 1
-_C.MODEL.FACSS_K = 16
-_C.MODEL.FACSS_DYNAMIC_K = 1
-_C.MODEL.FACSS_MIN_K = 8
-_C.MODEL.FACSS_MAX_K = 32
-_C.MODEL.FACSS_K_HIDDEN = 192
-_C.MODEL.FACSS_SOFT_RESIDUAL_WEIGHT = 0.15
-_C.MODEL.FACSS_ALPHA_HIDDEN = 192
+_C.MODEL.HS_RESIDUAL_TOKEN = 0
 _C.MODEL.SELECTED_PATCH_BLEND_WEIGHT = 0.15
 _C.MODEL.SELECTED_PATCH_CONTEXT = 'mean'
 _C.MODEL.SELECTED_PATCH_ATTN_SCALE = 10.0
@@ -81,29 +70,6 @@ _C.MODEL.SELECTED_AGGREGATION = 0
 _C.MODEL.SELECTED_AGG_NUM_HEADS = 12
 _C.MODEL.SELECTED_AGG_GATE_INIT_BIAS = -2.0
 _C.MODEL.SELECTED_AGG_RESIDUAL_WEIGHT = 0.5
-# Pooling for cross-modal cosine: 'max' (paper) | 'topk' | 'lse'
-_C.MODEL.FACSS_CROSS_POOL = 'max'
-_C.MODEL.FACSS_CROSS_TOPK = 3
-_C.MODEL.FACSS_CROSS_LSE_TAU = 5.0
-# Alpha granularity: 'sample' (paper) | 'token'
-_C.MODEL.FACSS_ALPHA_GRANULARITY = 'sample'
-# Score normalization: 'minmax' (paper) | 'robust' | 'zscore'
-_C.MODEL.FACSS_NORM = 'minmax'
-# Straight-through estimator on top-K to enable gradient flow into alpha_mlp;
-# forward is identical to hard top-K, backward routes through softmax of scores.
-_C.MODEL.FACSS_STE = 1
-_C.MODEL.FACSS_STE_TAU = 1.0
-# Align selected patch indices across modalities. Inspired by EDITOR/Magic
-# Tokens, the final selected mask is the union of RGB/NIR/TIR selections.
-_C.MODEL.FACSS_MODALITY_UNION = 1
-# When another modality selects a patch, keep the same patch in this modality
-# too instead of pooling over a modality-specific mask only.
-_C.MODEL.FACSS_UNION_PROMOTE = 1
-# Standalone TOP-ReID TPM reproduction. Kept separate from the legacy AGF
-# wrapper so it receives complete backbone tokens and directly forms the main
-# descriptor.
-_C.MODEL.TPM = 0
-_C.MODEL.TPM_NUM_HEADS = 12
 # FACSS-guided Adaptive Cross-modal Routing (project extension).
 _C.MODEL.FACR = 0
 _C.MODEL.FACR_USE_SCORES = 1
@@ -153,24 +119,6 @@ _C.MODEL.DECOUPLED_MOE_DROPOUT = 0.1
 _C.MODEL.DECOUPLED_MOE_LOSS_WEIGHT = 1.0
 # OCFR auxiliary loss (not in paper); off by default for paper-faithful reproduction
 _C.MODEL.OCFR = 0
-# Ablation switches (1=enable, 0=disable)
-_C.MODEL.AGF = 1
-# AGF (Adaptive Gated Fusion) hyperparameters
-_C.MODEL.AGF_NUM_HEADS = 12
-_C.MODEL.AGF_MODE = 'graph'
-_C.MODEL.AGF_TPM_STEPS = 3
-_C.MODEL.AGF_USE_MASKS = 1
-_C.MODEL.AGF_GATE_INIT_BIAS = -2.0
-_C.MODEL.AGF_RESIDUAL_WEIGHT = 0.35
-_C.MODEL.AGF_LEARNABLE_RESIDUAL = 0
-_C.MODEL.AGF_RESIDUAL_INIT = 0.02
-_C.MODEL.AGF_QUALITY_SCALE = 1
-_C.MODEL.AGF_FUSION_MODE = 'residual'
-_C.MODEL.AGF_CONCAT_WEIGHT = 0.35
-_C.MODEL.AGF_AUX_SUPERVISION = 0
-_C.MODEL.AGF_AGREE_MIN = 0.15
-_C.MODEL.AGF_AGREE_TEMP = 10.0
-_C.MODEL.AGF_NORM_CAP = 0.35
 # Nighttime modality reliability. The prior only initializes the quality head:
 # RGB is kept useful but starts slightly below NIR/TIR for night imagery.
 _C.MODEL.QUALITY_AWARE = 1

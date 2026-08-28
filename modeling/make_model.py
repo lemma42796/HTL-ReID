@@ -6,13 +6,27 @@ from modeling.backbones.vit_pytorch import vit_base_patch16_224, vit_small_patch
     deit_small_patch16_224
 from modeling.fusion_part.Frequency import Frequency_based_Token_Selection
 from modeling.fusion_part.OCFR import OCFR
-from modeling.fusion_part.HS_FACSS import HSFACSS
-from modeling.fusion_part.SFTS import SFTS
-from modeling.fusion_part.AGF import AGF
-from modeling.fusion_part.TPM import TPM, FACR
+from modeling.fusion_part.HS import HS
+from modeling.fusion_part.FACR import FACR
 from modeling.fusion_part.CrossModalReconstruction import \
     SharedCrossModalTokenReconstruction
 from modeling.fusion_part.DecoupledMoEFusion import DecoupledMoEFusion
+
+
+# Frozen checkpoints (E042/E043/E046/E047...) store the HS selector under
+# its historical 'SFTS.' prefix. Map it onto the renamed 'HS.' module so the
+# weights load without re-exporting checkpoints.
+_CHECKPOINT_KEY_REMAPS = {
+    'SFTS.': 'HS.',
+}
+
+
+def _migrate_checkpoint_key(key):
+    key = key.replace('module.', '')
+    for old_prefix, new_prefix in _CHECKPOINT_KEY_REMAPS.items():
+        if key.startswith(old_prefix):
+            return new_prefix + key[len(old_prefix):]
+    return key
 
 
 def weights_init_kaiming(m):
@@ -257,31 +271,24 @@ class HTLReID(nn.Module):
         self.feat_h = int(cfg.INPUT.SIZE_TRAIN[0] // cfg.MODEL.STRIDE_SIZE[0])
         self.feat_w = int(cfg.INPUT.SIZE_TRAIN[1] // cfg.MODEL.STRIDE_SIZE[1])
         self.num_patches = self.feat_h * self.feat_w
-        self.use_sfts = bool(cfg.MODEL.SFTS_ENABLED)
-        self.sfts_residual_token = bool(cfg.MODEL.SFTS_RESIDUAL_TOKEN)
-        if self.use_sfts and (bool(cfg.MODEL.HS_ENABLED) or bool(cfg.MODEL.FACSS_ENABLED)):
-            raise ValueError('MODEL.SFTS_ENABLED is mutually exclusive with HS/FACSS')
-        if self.sfts_residual_token and not self.use_sfts:
-            raise ValueError('SFTS_RESIDUAL_TOKEN requires SFTS_ENABLED')
-        # Keep the historical module name so existing HS/FACSS checkpoints
-        # retain exactly the same state-dict keys.
-        self.HS_FACSS = HSFACSS(dim=self.BACKBONE.token_dim, cfg=cfg)
-        if self.use_sfts:
-            self.SFTS = SFTS(
-                ratio=cfg.MODEL.SFTS_RATIO,
-                learnable_k=bool(cfg.MODEL.SFTS_LEARNABLE_K),
-                k_candidates=cfg.MODEL.SFTS_K_CANDIDATES,
-                gumbel_tau=cfg.MODEL.SFTS_GUMBEL_TAU,
-                gumbel_tau_min=cfg.MODEL.SFTS_GUMBEL_TAU_MIN,
-                gumbel_tau_decay=cfg.MODEL.SFTS_GUMBEL_TAU_DECAY,
-                budget_loss_weight=cfg.MODEL.SFTS_BUDGET_LOSS_WEIGHT,
+        self.use_hs = bool(cfg.MODEL.HS_ENABLED)
+        self.hs_residual_token = bool(cfg.MODEL.HS_RESIDUAL_TOKEN)
+        if self.hs_residual_token and not self.use_hs:
+            raise ValueError('HS_RESIDUAL_TOKEN requires HS_ENABLED')
+        if self.use_hs:
+            self.HS = HS(
+                ratio=cfg.MODEL.HS_RATIO,
+                learnable_k=bool(cfg.MODEL.HS_LEARNABLE_K),
+                k_candidates=cfg.MODEL.HS_K_CANDIDATES,
+                gumbel_tau=cfg.MODEL.HS_GUMBEL_TAU,
+                gumbel_tau_min=cfg.MODEL.HS_GUMBEL_TAU_MIN,
+                gumbel_tau_decay=cfg.MODEL.HS_GUMBEL_TAU_DECAY,
+                budget_loss_weight=cfg.MODEL.HS_BUDGET_LOSS_WEIGHT,
             )
         self.use_frequency = bool(cfg.MODEL.FREQUENCY_ENABLED)
         self.FREQ_INDEX = Frequency_based_Token_Selection(keep=cfg.MODEL.FREQUENCY_KEEP,
                                                           stride=cfg.MODEL.STRIDE_SIZE[0],
                                                           quality_aware=cfg.MODEL.FREQUENCY_QUALITY_AWARE)
-        self.use_agf = bool(cfg.MODEL.AGF)
-        self.use_tpm = bool(cfg.MODEL.TPM)
         self.use_facr = bool(cfg.MODEL.FACR)
         self.facr_use_scores = bool(cfg.MODEL.FACR_USE_SCORES)
         self.facr_use_masks = bool(cfg.MODEL.FACR_USE_MASKS)
@@ -302,13 +309,11 @@ class HTLReID(nn.Module):
         self.hetero_triplet_margin = float(cfg.MODEL.HETERO_TRIPLET_MARGIN)
         self.use_decoupled_moe = bool(cfg.MODEL.DECOUPLED_MOE)
         self._last_facr_stats_epoch = None
-        if sum((self.use_agf, self.use_tpm, self.use_facr)) > 1:
-            raise ValueError('MODEL.AGF, MODEL.TPM, and MODEL.FACR are mutually exclusive')
-        if self.use_facr and self.facr_use_scores and not bool(cfg.MODEL.FACSS_ENABLED):
-            raise ValueError('FACR_USE_SCORES requires FACSS_ENABLED')
-        if self.use_facr and self.facr_use_masks and not (
-                bool(cfg.MODEL.FACSS_ENABLED) or self.use_sfts):
-            raise ValueError('FACR_USE_MASKS requires FACSS or SFTS')
+        if self.use_facr and self.facr_use_scores:
+            raise ValueError('FACR_USE_SCORES requires continuous selector scores, '
+                             'which the HS selector does not provide')
+        if self.use_facr and self.facr_use_masks and not self.use_hs:
+            raise ValueError('FACR_USE_MASKS requires HS')
         if self.facr_residual_fusion and not self.use_facr:
             raise ValueError('FACR_RESIDUAL_FUSION requires FACR')
         if self.facr_isolated_branch and not self.use_facr:
@@ -327,10 +332,10 @@ class HTLReID(nn.Module):
         if self.facr_independent_aggregation and not self.facr_use_masks:
             raise ValueError(
                 'FACR_INDEPENDENT_AGG requires FACR_USE_MASKS')
-        if self.sfts_residual_token and not (
+        if self.hs_residual_token and not (
                 self.use_facr and self.facr_use_masks and self.facr_self_refine):
             raise ValueError(
-                'SFTS_RESIDUAL_TOKEN requires masked FACR self-refinement')
+                'HS_RESIDUAL_TOKEN requires masked FACR self-refinement')
         if self.cross_modal_recon_loss_weight < 0.0:
             raise ValueError(
                 'CROSS_MODAL_RECON_LOSS_WEIGHT must be non-negative')
@@ -402,16 +407,6 @@ class HTLReID(nn.Module):
             raise ValueError("MODEL.SELECTED_PATCH_CONTEXT must be 'mean' or 'attn_gate'")
         self.selected_patch_attn_scale = float(cfg.MODEL.SELECTED_PATCH_ATTN_SCALE)
         self.use_selected_aggregation = bool(cfg.MODEL.SELECTED_AGGREGATION)
-        self.agf_residual_weight = float(cfg.MODEL.AGF_RESIDUAL_WEIGHT)
-        self.agf_learnable_residual = bool(cfg.MODEL.AGF_LEARNABLE_RESIDUAL)
-        self.agf_fusion_mode = cfg.MODEL.AGF_FUSION_MODE.lower()
-        if self.agf_fusion_mode not in ('residual', 'agreement', 'concat'):
-            raise ValueError("MODEL.AGF_FUSION_MODE must be 'residual', 'agreement', or 'concat'")
-        self.agf_concat_weight = float(cfg.MODEL.AGF_CONCAT_WEIGHT)
-        self.agf_aux_supervision = bool(cfg.MODEL.AGF_AUX_SUPERVISION)
-        self.agf_agree_min = float(cfg.MODEL.AGF_AGREE_MIN)
-        self.agf_agree_temp = float(cfg.MODEL.AGF_AGREE_TEMP)
-        self.agf_norm_cap = float(cfg.MODEL.AGF_NORM_CAP)
         if self.selected_patch_context == 'attn_gate':
             self.SELECTED_CONTEXT_NORM = nn.LayerNorm(self.BACKBONE.token_dim)
             self.SELECTED_CONTEXT_GATE = nn.Linear(2 * self.BACKBONE.token_dim,
@@ -425,11 +420,6 @@ class HTLReID(nn.Module):
                 num_heads=cfg.MODEL.SELECTED_AGG_NUM_HEADS,
                 gate_init_bias=cfg.MODEL.SELECTED_AGG_GATE_INIT_BIAS,
                 residual_weight=cfg.MODEL.SELECTED_AGG_RESIDUAL_WEIGHT,
-            )
-        if self.use_tpm:
-            self.TPM = TPM(
-                dim=self.BACKBONE.token_dim,
-                num_heads=cfg.MODEL.TPM_NUM_HEADS,
             )
         if self.use_facr:
             def build_facr():
@@ -481,30 +471,6 @@ class HTLReID(nn.Module):
                 gate_heads=cfg.MODEL.DECOUPLED_MOE_GATE_HEADS,
                 dropout=cfg.MODEL.DECOUPLED_MOE_DROPOUT,
             )
-        if self.use_agf:
-            self.AGF = AGF(dim=self.BACKBONE.token_dim,
-                           num_heads=cfg.MODEL.AGF_NUM_HEADS,
-                           gate_init_bias=cfg.MODEL.AGF_GATE_INIT_BIAS,
-                           quality_scale=bool(cfg.MODEL.AGF_QUALITY_SCALE),
-                           mode=cfg.MODEL.AGF_MODE,
-                           tpm_steps=cfg.MODEL.AGF_TPM_STEPS,
-                           use_masks=bool(cfg.MODEL.AGF_USE_MASKS))
-            if self.agf_learnable_residual:
-                max_weight = max(float(self.agf_residual_weight), 1e-4)
-                init_weight = min(max(float(cfg.MODEL.AGF_RESIDUAL_INIT), 1e-6),
-                                  max_weight * 0.999)
-                init_ratio = init_weight / max_weight
-                init_logit = torch.logit(torch.tensor(init_ratio))
-                self.AGF_RESIDUAL_LOGIT = nn.Parameter(init_logit)
-            if self.agf_aux_supervision:
-                self.AGF_BASE_BN = nn.BatchNorm1d(3 * self.BACKBONE.token_dim)
-                self.AGF_BASE_HEAD = nn.Linear(3 * self.BACKBONE.token_dim,
-                                               num_classes, bias=False)
-                self.AGF_BRANCH_BN = nn.BatchNorm1d(3 * self.BACKBONE.token_dim)
-                self.AGF_BRANCH_HEAD = nn.Linear(3 * self.BACKBONE.token_dim,
-                                                 num_classes, bias=False)
-                self.AGF_BASE_HEAD.apply(weights_init_classifier)
-                self.AGF_BRANCH_HEAD.apply(weights_init_classifier)
         if self.use_adapter:
             self.MODALITY_ADAPTERS = nn.ModuleDict({
                 'RGB': ModalityAdapter(self.BACKBONE.token_dim,
@@ -529,8 +495,6 @@ class HTLReID(nn.Module):
 
         # The output learning params of fused features
         self.fuse_dim = 3 * self.BACKBONE.token_dim
-        if self.use_agf and self.agf_fusion_mode == 'concat':
-            self.fuse_dim *= 2
         self.FUSE_HEAD = nn.Linear(self.fuse_dim, num_classes, bias=False)
         self.FUSE_BN = nn.BatchNorm1d(self.fuse_dim)
         self.FUSE_HEAD.apply(weights_init_classifier)
@@ -652,51 +616,14 @@ class HTLReID(nn.Module):
             ]
         return torch.cat(cls_list, dim=-1)
 
-    def _agf_cls(self, rgb_feat, nir_feat, tir_feat, quality_scores=None, masks=None):
-        base_cls = self._concat_cls(rgb_feat, nir_feat, tir_feat,
-                                    quality_scores, masks=masks)
-        agf_cls = self.AGF(rgb_feat, nir_feat, tir_feat,
-                           quality_scores=quality_scores, masks=masks)
-        self._last_agf_aux_features = (base_cls, agf_cls)
-        if self.agf_fusion_mode == 'concat':
-            return torch.cat([base_cls, self.agf_concat_weight * agf_cls], dim=-1)
-
-        max_weight = max(0.0, min(1.0, self.agf_residual_weight))
-        if self.agf_learnable_residual:
-            weight = max_weight * torch.sigmoid(self.AGF_RESIDUAL_LOGIT)
-        else:
-            weight = max_weight
-        if self.agf_fusion_mode == 'residual':
-            return base_cls + weight * (agf_cls - base_cls)
-
-        base_nodes = base_cls.chunk(3, dim=-1)
-        agf_nodes = agf_cls.chunk(3, dim=-1)
-        fused_nodes = []
-        for idx, (base_node, agf_node) in enumerate(zip(base_nodes, agf_nodes)):
-            delta = agf_node - base_node
-            if self.agf_norm_cap > 0:
-                base_norm = base_node.norm(dim=-1, keepdim=True).clamp_min(1e-6)
-                delta_norm = delta.norm(dim=-1, keepdim=True).clamp_min(1e-6)
-                max_delta = base_norm * self.agf_norm_cap
-                delta = delta * (max_delta / delta_norm).clamp(max=1.0)
-
-            agree = F.cosine_similarity(base_node, agf_node, dim=-1, eps=1e-6)
-            gate = torch.sigmoid(
-                (agree - self.agf_agree_min) * self.agf_agree_temp
-            ).unsqueeze(-1)
-            fused_nodes.append(base_node + weight * gate * delta)
-        return torch.cat(fused_nodes, dim=-1)
-
     def _fusion_cls(self, full_feats, selected_feats, quality_scores=None,
-                    masks=None, facss_scores=None, facr_masks=None,
+                    masks=None, hs_scores=None, facr_masks=None,
                     facr_residual_tokens=None):
         """Select exactly one descriptor path while keeping inputs explicit."""
         rgb_full, nir_full, tir_full = full_feats
         rgb_sel, nir_sel, tir_sel = selected_feats
-        if self.use_tpm:
-            return self.TPM(rgb_full, nir_full, tir_full)
         if self.use_facr:
-            scores = facss_scores if self.facr_use_scores else None
+            scores = hs_scores if self.facr_use_scores else None
             facr_masks = facr_masks if self.facr_use_masks else None
             facr_inputs = full_feats
             if self.facr_isolated_branch:
@@ -729,22 +656,28 @@ class HTLReID(nn.Module):
                 self.FACR_RESIDUAL_LOGIT).to(dtype=routed_cls.dtype)
             return selector_cls + residual_scale * (
                 routed_cls - original_cls)
-        if self.use_agf:
-            return self._agf_cls(
-                rgb_sel, nir_sel, tir_sel, quality_scores, masks=masks)
         return self._concat_cls(
             rgb_sel, nir_sel, tir_sel, quality_scores, masks=masks)
 
     def _select_tokens(self, **kwargs):
-        if self.use_sfts:
-            kwargs['return_residual_tokens'] = self.sfts_residual_token
-            return self.SFTS(**kwargs)
-        return self.HS_FACSS(**kwargs)
+        feats = [kwargs['RGB_feat'], kwargs['NIR_feat']]
+        if kwargs.get('TIR_feat') is not None:
+            feats.append(kwargs['TIR_feat'])
+        if not self.use_hs:
+            # Baseline bypass: keep every token and mark all patches selected,
+            # matching the historical disabled-selector behavior (A0/M0 rows).
+            num_patches = feats[0].shape[1] - 1
+            mask = torch.ones(
+                feats[0].shape[0], num_patches, dtype=torch.bool,
+                device=feats[0].device)
+            return tuple(feats) + (tuple(mask for _ in feats),)
+        kwargs['return_residual_tokens'] = self.hs_residual_token
+        return self.HS(**kwargs)
 
     def _selector_regularization(self, reference):
-        if not self.use_sfts:
+        if not self.use_hs:
             return torch.zeros((), device=reference.device, dtype=reference.dtype)
-        return self.SFTS.regularization_loss(reference)
+        return self.HS.regularization_loss(reference)
 
     def _facr_regularization(self, reference):
         if not self.use_facr:
@@ -770,17 +703,6 @@ class HTLReID(nn.Module):
                 'FACR/residual_scale',
                 torch.sigmoid(self.FACR_RESIDUAL_LOGIT).item(), epoch)
         self._last_facr_stats_epoch = int(epoch)
-
-    def _agf_aux_pairs(self):
-        if (not self.training) or (not self.use_agf) or (not self.agf_aux_supervision):
-            return []
-        if not hasattr(self, '_last_agf_aux_features'):
-            return []
-        base_cls, agf_cls = self._last_agf_aux_features
-        return [
-            self.AGF_BASE_HEAD(self.AGF_BASE_BN(base_cls)), base_cls,
-            self.AGF_BRANCH_HEAD(self.AGF_BRANCH_BN(agf_cls)), agf_cls,
-        ]
 
     def _apply_modality_dropout(self, rgb, nir, tir=None, return_keep=False):
         if (not self.training) or self.modality_drop_prob <= 0:
@@ -1076,7 +998,7 @@ class HTLReID(nn.Module):
         model_dict = self.state_dict()
         loaded, skipped = [], []
         for k, v in param_dict.items():
-            clean_key = k.replace('module.', '')
+            clean_key = _migrate_checkpoint_key(k)
             if clean_key not in model_dict:
                 skipped.append(clean_key)
                 continue
@@ -1134,23 +1056,23 @@ class HTLReID(nn.Module):
                 return_gates=self.use_facr and self.facr_use_masks)
             RGB_feat_s, NIR_feat_s, TIR_feat_s, mask = selection[:4]
             selection_idx = 4
-            facss_scores = None
-            facss_gates = None
+            hs_scores = None
+            hs_gates = None
             facr_residual_tokens = None
             if self.use_facr and self.facr_use_scores:
-                facss_scores = selection[selection_idx]
+                hs_scores = selection[selection_idx]
                 selection_idx += 1
             if self.use_facr and self.facr_use_masks:
-                facss_gates = selection[selection_idx]
+                hs_gates = selection[selection_idx]
                 selection_idx += 1
-            if self.sfts_residual_token:
+            if self.hs_residual_token:
                 facr_residual_tokens = selection[selection_idx]
 
             fusion_output = self._fusion_cls(
                 (RGB_feat, NIR_feat, TIR_feat),
                 (RGB_feat_s, NIR_feat_s, TIR_feat_s),
                 quality_scores=quality_scores, masks=mask,
-                facss_scores=facss_scores, facr_masks=facss_gates,
+                hs_scores=hs_scores, facr_masks=hs_gates,
                 facr_residual_tokens=facr_residual_tokens)
             isolated_facr_feat = None
             if self.facr_isolated_branch:
@@ -1177,7 +1099,6 @@ class HTLReID(nn.Module):
             if self.facr_isolated_branch:
                 isolated_facr_score = self.FACR_ISOLATED_HEAD(
                     self.FACR_ISOLATED_BN(isolated_facr_feat))
-            agf_aux_pairs = self._agf_aux_pairs()
             if self.use_decoupled_moe:
                 decoupled_moe_feat = self.DECOUPLED_MOE(
                     RGB_feat, NIR_feat, TIR_feat)
@@ -1192,7 +1113,7 @@ class HTLReID(nn.Module):
                     output += [isolated_facr_score, isolated_facr_feat]
                 if self.use_decoupled_moe:
                     output += [decoupled_moe_score, decoupled_moe_feat]
-                output += agf_aux_pairs + [ori_score, ori]
+                output += [ori_score, ori]
                 if self.use_part:
                     output += [part_score, part_feat]
                 output += [loss_aux]
@@ -1203,7 +1124,7 @@ class HTLReID(nn.Module):
                     output += [isolated_facr_score, isolated_facr_feat]
                 if self.use_decoupled_moe:
                     output += [decoupled_moe_score, decoupled_moe_feat]
-                output += agf_aux_pairs + [
+                output += [
                     RGB_cls_score, RGB_cls4tri, NIR_cls_score,
                     NIR_cls4tri, TIR_cls_score, TIR_cls4tri]
                 if self.use_part:
@@ -1233,23 +1154,23 @@ class HTLReID(nn.Module):
                 return_gates=self.use_facr and self.facr_use_masks)
             RGB_feat_s, NIR_feat_s, TIR_feat_s, mask = selection[:4]
             selection_idx = 4
-            facss_scores = None
-            facss_gates = None
+            hs_scores = None
+            hs_gates = None
             facr_residual_tokens = None
             if self.use_facr and self.facr_use_scores:
-                facss_scores = selection[selection_idx]
+                hs_scores = selection[selection_idx]
                 selection_idx += 1
             if self.use_facr and self.facr_use_masks:
-                facss_gates = selection[selection_idx]
+                hs_gates = selection[selection_idx]
                 selection_idx += 1
-            if self.sfts_residual_token:
+            if self.hs_residual_token:
                 facr_residual_tokens = selection[selection_idx]
 
             fusion_output = self._fusion_cls(
                 (RGB_feat, NIR_feat, TIR_feat),
                 (RGB_feat_s, NIR_feat_s, TIR_feat_s),
                 quality_scores=quality_scores, masks=mask,
-                facss_scores=facss_scores, facr_masks=facss_gates,
+                hs_scores=hs_scores, facr_masks=hs_gates,
                 facr_residual_tokens=facr_residual_tokens)
             isolated_facr_feat = None
             if self.facr_isolated_branch:
@@ -1275,8 +1196,8 @@ class HTLReID(nn.Module):
                                mode=1,
                                writer=None, epoch=None):
         # This forward function is used for the two modalities datasets like RGBN300
-        if self.use_tpm or self.use_facr:
-            raise ValueError('TPM and FACR currently require RGB/NIR/TIR input')
+        if self.use_facr:
+            raise ValueError('FACR currently requires RGB/NIR/TIR input')
         if self.training:
             RGB = x['RGB']
             NIR = x['NI']
@@ -1312,12 +1233,8 @@ class HTLReID(nn.Module):
                                                          quality_scores=quality_scores)
 
             TIR_feat_s = torch.zeros_like(RGB_feat_s)
-            if self.use_agf:
-                cls4t = self._agf_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
-                                      quality_scores, masks=mask)
-            else:
-                cls4t = self._concat_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
-                                         quality_scores, masks=mask)
+            cls4t = self._concat_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
+                                     quality_scores, masks=mask)
             if self.use_ocfr:
                 RGB_cls = RGB_feat_s[:, 0, :]
                 NIR_cls = NIR_feat_s[:, 0, :]
@@ -1331,22 +1248,21 @@ class HTLReID(nn.Module):
             loss_aux = loss_aux + self._quality_dropout_loss(quality_scores, keep_mask)
             loss_aux = loss_aux + self._selector_regularization(RGB_feat)
             score = self.FUSE_HEAD(self.FUSE_BN(cls4t))
-            agf_aux_pairs = self._agf_aux_pairs()
             if self.use_part:
                 part_feat = self._part_feature(RGB_feat_s, NIR_feat_s, TIR_feat_s, quality_scores, masks=mask)
                 part_score = self.PART_HEAD(self.PART_BN(part_feat))
             if self.AL:
                 if self.use_part:
-                    return tuple([score, cls4t] + agf_aux_pairs +
+                    return tuple([score, cls4t] +
                                  [ori_score, ori, part_score, part_feat, loss_aux])
-                return tuple([score, cls4t] + agf_aux_pairs +
+                return tuple([score, cls4t] +
                              [ori_score, ori, loss_aux])
             else:
                 if self.use_part:
-                    return tuple([score, cls4t] + agf_aux_pairs +
+                    return tuple([score, cls4t] +
                                  [RGB_cls_score, RGB_cls4tri, NIR_cls_score,
                                   NIR_cls4tri, part_score, part_feat, loss_aux])
-                return tuple([score, cls4t] + agf_aux_pairs +
+                return tuple([score, cls4t] +
                              [RGB_cls_score, RGB_cls4tri, NIR_cls_score,
                               NIR_cls4tri, loss_aux])
 
@@ -1373,12 +1289,8 @@ class HTLReID(nn.Module):
                                                          quality_scores=quality_scores)
 
             TIR_feat_s = torch.zeros_like(RGB_feat_s)
-            if self.use_agf:
-                cls4t = self._agf_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
-                                      quality_scores, masks=mask)
-            else:
-                cls4t = self._concat_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
-                                         quality_scores, masks=mask)
+            cls4t = self._concat_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
+                                     quality_scores, masks=mask)
             return self._test_descriptor(cls4t, RGB_feat_s, NIR_feat_s, TIR_feat_s,
                                          quality_scores, masks=mask)
 

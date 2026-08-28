@@ -2,12 +2,10 @@
 # Merge after configs/RGBNT201/paper/base.yml.
 MODEL:
   HS_ENABLED: 1
-  FACSS_ENABLED: 1
   QUALITY_AWARE: 0
   # FACR directly consumes dense scores and complete tokens; legacy selected
   # patch mean blending is disabled to avoid a second fusion mechanism.
   SELECTED_PATCH_BLEND_WEIGHT: 0.0
-  TPM: 0
   FACR: 1
   FACR_USE_SCORES: 1
   FACR_NUM_HEADS: 12

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate one learnable-K SFTS checkpoint at several forced K values."""
+"""Evaluate one learnable-K HS checkpoint at several forced K values."""
 
 import argparse
 import json
@@ -71,10 +71,10 @@ def main():
         cfg.merge_from_file(config_file)
     if str(cfg.TEST.RE_RANKING).lower() != "no":
         raise ValueError("K sweep must run with re-ranking disabled")
-    if not cfg.MODEL.SFTS_ENABLED or not cfg.MODEL.SFTS_LEARNABLE_K:
-        raise ValueError("K sweep requires a learnable-K SFTS config")
+    if not cfg.MODEL.HS_ENABLED or not cfg.MODEL.HS_LEARNABLE_K:
+        raise ValueError("K sweep requires a learnable-K HS config")
 
-    candidates = [int(value) for value in cfg.MODEL.SFTS_K_CANDIDATES]
+    candidates = [int(value) for value in cfg.MODEL.HS_K_CANDIDATES]
     requested = [int(value) for value in args.k]
     missing = sorted(set(requested) - set(candidates))
     if missing:
@@ -94,8 +94,8 @@ def main():
     results = []
     with torch.no_grad():
         for keep_k in requested:
-            model.SFTS.k_logits.fill_(-100.0)
-            model.SFTS.k_logits[candidates.index(keep_k)] = 100.0
+            model.HS.k_logits.fill_(-100.0)
+            model.HS.k_logits[candidates.index(keep_k)] = 100.0
             metrics = evaluate(cfg, model, val_loader, num_query)
             result = {"K": keep_k, **metrics}
             results.append(result)

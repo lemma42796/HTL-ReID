@@ -1,4 +1,4 @@
-"""CPU regression checks for SFTS residual tokens and FACR self-refinement."""
+"""CPU regression checks for HS residual tokens and FACR self-refinement."""
 
 import argparse
 from pathlib import Path
@@ -11,8 +11,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from config import cfg as default_cfg
-from modeling.fusion_part.SFTS import SFTS
-from modeling.fusion_part.TPM import FACR
+from modeling.fusion_part.HS import HS
+from modeling.fusion_part.FACR import FACR
 from modeling.make_model import make_model
 
 
@@ -40,7 +40,7 @@ def check_configs():
     print('OK config merge')
 
 
-def check_sfts_residual_gradient():
+def check_hs_residual_gradient():
     torch.manual_seed(11)
     batch, heads, patches, dim = 2, 2, 16, 16
     features = [
@@ -51,7 +51,7 @@ def check_sfts_residual_gradient():
         attention_stack(batch, heads, patches + 1)
         for _ in range(3)
     ]
-    selector = SFTS(ratio=1.0 / patches)
+    selector = HS(ratio=1.0 / patches)
     legacy = selector(
         features[0], attentions[0],
         features[1], attentions[1],
@@ -76,7 +76,7 @@ def check_sfts_residual_gradient():
         dropped_grad = feature.grad[:, 1:, :][~mask]
         assert dropped_grad.numel() > 0
         assert dropped_grad.abs().sum() > 0
-    print('OK SFTS residual-token gradient')
+    print('OK HS residual-token gradient')
 
 
 def check_facr_self_refinement():
@@ -166,7 +166,7 @@ def main():
     parser.add_argument('--full-model', action='store_true')
     args = parser.parse_args()
     check_configs()
-    check_sfts_residual_gradient()
+    check_hs_residual_gradient()
     check_facr_self_refinement()
     check_disabled_contract()
     if args.full_model:

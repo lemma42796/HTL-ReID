@@ -1,6 +1,5 @@
 # M2: M1 + Fusion-Aware Synergistic Selection (FACSS).
 MODEL:
   HS_ENABLED: 1
-  FACSS_ENABLED: 1
   QUALITY_AWARE: 0
   SELECTED_PATCH_BLEND_WEIGHT: 0.15

@@ -1,8 +1,11 @@
-"""Paper-faithful salient and frequency token selection from EDITOR.
+"""Hierarchical Token Selection (HS).
 
-The implementation keeps the selection rule from the official EDITOR source,
-but removes visualization-only code and CUDA hard-coding so it can be used by
-HTL-ReID on any device. BCC and OCFR are intentionally not part of this module.
+Rolls out ViT attention across layers (A_L @ ... @ A_1), keeps the per-head
+top-K patches, and unites the masks across heads and modalities. The optional
+frequency mask from Frequency-based Token Selection is merged into the same
+shared union. The selection rule itself follows the official EDITOR source,
+with visualization-only code and CUDA hard-coding removed so it can run on any
+device. BCC and OCFR are intentionally not part of this module.
 """
 
 import torch
@@ -16,13 +19,13 @@ class PartAttention(nn.Module):
     def __init__(self, ratio=0.5):
         super().__init__()
         if not 0.0 < ratio <= 1.0:
-            raise ValueError("SFTS ratio must be in (0, 1]")
+            raise ValueError("HS ratio must be in (0, 1]")
         self.ratio = float(ratio)
 
     @staticmethod
     def _rollout_cls(attn_list):
         if not attn_list:
-            raise ValueError("SFTS requires a non-empty backbone attention list")
+            raise ValueError("HS requires a non-empty backbone attention list")
 
         # EDITOR forms A_L @ ... @ A_1 and consumes only its CLS row. Propagate
         # that row backwards through the same matrices instead of materializing
@@ -49,7 +52,7 @@ class PartAttention(nn.Module):
 
         if candidate_weights is not None:
             if candidates is None or candidate_weights.numel() != len(candidates):
-                raise ValueError("SFTS candidate weights and K candidates differ")
+                raise ValueError("HS candidate weights and K candidates differ")
             candidate_k = [min(max(1, int(k)), num_patches) for k in candidates]
             max_keep = max(candidate_k)
             ranked = cls_attention.topk(max_keep, dim=2).indices
@@ -82,14 +85,14 @@ class PartAttention(nn.Module):
         return mask, saliency
 
 
-class SFTS(nn.Module):
+class HS(nn.Module):
     """Select one shared patch set for all available modalities.
 
     Each modality first produces a per-head attention mask. The masks are
     united across heads and modalities, then united with the optional
-    frequency mask exactly as in the official EDITOR implementation. When
-    requested, each modality also summarizes patches outside that shared mask
-    into one residual token without changing the paper-faithful hard mask.
+    frequency mask. When requested, each modality also summarizes patches
+    outside that shared mask into one residual token without changing the
+    hard mask.
     """
 
     def __init__(self, ratio=0.5, learnable_k=False, k_candidates=None,
@@ -100,9 +103,9 @@ class SFTS(nn.Module):
         self.learnable_k = bool(learnable_k)
         self.k_candidates = tuple(int(k) for k in (k_candidates or (1, 2, 4, 8, 16)))
         if any(k <= 0 for k in self.k_candidates):
-            raise ValueError("SFTS K candidates must be positive")
+            raise ValueError("HS K candidates must be positive")
         if len(set(self.k_candidates)) != len(self.k_candidates):
-            raise ValueError("SFTS K candidates must be unique")
+            raise ValueError("HS K candidates must be unique")
         self.gumbel_tau = float(gumbel_tau)
         self.gumbel_tau_min = float(gumbel_tau_min)
         self.gumbel_tau_decay = float(gumbel_tau_decay)
@@ -162,7 +165,7 @@ class SFTS(nn.Module):
                 return_residual_tokens=False):
         del img_path, quality_scores
         if return_scores:
-            raise ValueError("SFTS provides a hard mask, not continuous scores")
+            raise ValueError("HS provides a hard mask, not continuous scores")
 
         modalities = [("RGB", RGB_feat, RGB_attn)]
         if NIR_feat is not None:
@@ -176,7 +179,7 @@ class SFTS(nn.Module):
         modality_saliency = []
         for _, features, attentions in modalities:
             if attentions is None:
-                raise ValueError("SFTS requires attention maps for every modality")
+                raise ValueError("HS requires attention maps for every modality")
             if self.learnable_k:
                 modality_mask, modality_gate, saliency = self.part_select(
                     attentions, candidate_weights=candidate_weights,
@@ -185,7 +188,7 @@ class SFTS(nn.Module):
                 modality_mask, saliency = self.part_select(attentions)
                 modality_gate = modality_mask.to(features.dtype)
             if modality_mask.shape[1] != features.shape[1] - 1:
-                raise ValueError("SFTS attention and feature patch counts differ")
+                raise ValueError("HS attention and feature patch counts differ")
             shared_mask = (modality_mask if shared_mask is None
                            else shared_mask | modality_mask)
             shared_gate = (modality_gate if shared_gate is None else
@@ -194,7 +197,7 @@ class SFTS(nn.Module):
 
         if mask_fre is not None:
             if mask_fre.shape != shared_mask.shape:
-                raise ValueError("SFTS frequency mask shape must match patch mask")
+                raise ValueError("HS frequency mask shape must match patch mask")
             shared_mask = shared_mask | mask_fre.bool()
             frequency_gate = mask_fre.to(shared_gate.dtype)
             shared_gate = 1.0 - (1.0 - shared_gate) * (1.0 - frequency_gate)
@@ -216,8 +219,8 @@ class SFTS(nn.Module):
             probabilities = self.learned_k_probabilities()
             expected_k = sum(
                 k * probabilities[i] for i, k in enumerate(self.k_candidates))
-            writer.add_scalar('SFTS/expected_k', expected_k.item(), epoch)
-            writer.add_scalar('SFTS/final_union_ratio',
+            writer.add_scalar('HS/expected_k', expected_k.item(), epoch)
+            writer.add_scalar('HS/final_union_ratio',
                               shared_mask.float().mean().item(), epoch)
             self._last_logged_epoch = int(epoch)
 

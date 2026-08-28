@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure the actual post-union SFTS token retention of one checkpoint."""
+"""Measure the actual post-union HS token retention of one checkpoint."""
 
 import argparse
 import json
@@ -37,8 +37,8 @@ def main():
     cfg = default_cfg.clone()
     for config_file in args.config_file:
         cfg.merge_from_file(config_file)
-    if not cfg.MODEL.SFTS_ENABLED:
-        raise ValueError("retention measurement requires SFTS")
+    if not cfg.MODEL.HS_ENABLED:
+        raise ValueError("retention measurement requires HS")
     if not args.checkpoint.is_file():
         raise FileNotFoundError(args.checkpoint)
 
@@ -56,7 +56,7 @@ def main():
         mask = masks[0] if isinstance(masks, (tuple, list)) else masks
         counts.extend(mask.detach().sum(dim=1).cpu().tolist())
 
-    handle = model.SFTS.register_forward_hook(capture_mask)
+    handle = model.HS.register_forward_hook(capture_mask)
     with torch.inference_mode():
         for images, _, _, camids, target_view, paths in val_loader:
             images = {

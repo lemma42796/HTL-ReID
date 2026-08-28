@@ -2,19 +2,10 @@
 # Keep all patch tokens, concatenate RGB/NIR/TIR cls descriptors, and disable
 # quality/fusion/adapter/part auxiliary modules.
 MODEL:
-  HS_K: 999
-  FACSS_DYNAMIC_K: 0
-  FACSS_K: 999
-  FACSS_MIN_K: 999
-  FACSS_MAX_K: 999
-  FACSS_SOFT_RESIDUAL_WEIGHT: 0.0
   SELECTED_PATCH_BLEND_WEIGHT: 0.0
   SELECTED_PATCH_CONTEXT: 'mean'
-  FACSS_MODALITY_UNION: 1
-  FACSS_UNION_PROMOTE: 1
   FREQUENCY_QUALITY_AWARE: 0
   QUALITY_AWARE: 0
-  AGF: 0
   MODALITY_ADAPTER: 0
   PART_BRANCH: 0
   ALIGN_LOSS_WEIGHT: 0.0

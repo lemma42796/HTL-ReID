@@ -18,13 +18,12 @@ Coverage:
   9. Backward populates non-NaN gradients on every trainable parameter
  10. Loss assembly matches engine/processor.py's odd/even pairing rule
  11. state_dict save -> reload -> identical forward output
- 12. Ablation switches (AGF=0, OCFR=1) each produce a usable model
- 13. Paper M0-M3 configs differ only through explicit HS/FACSS/QAWF switches
- 14. M0 bypass, HS-only, and HS+FACSS selection paths behave distinctly
+ 12. Ablation switches (HS=0, OCFR=1) each produce a usable model
+ 13. Paper M0-M3 configs differ only through explicit HS/QAWF switches
+ 14. M0 bypasses token selection; M1+ run the HS selector
  15. Every paper row completes an end-to-end train/eval smoke pass
  16. The legacy-style A2 config runs quality-aware frequency selection
- 17. Optimized rollout, cross-score, dynamic-K, and frequency kernels preserve
-     their reference outputs
+ 17. Optimized rollout and frequency kernels preserve their reference outputs
  18. AdamW uses grouped multi-tensor parameter groups
  19. FACR route balancing is differentiable and disabled by default
  20. T11 independent masked aggregation ignores dropped patches, backpropagates,
@@ -43,9 +42,9 @@ import torch
 
 from config import cfg as default_cfg
 from modeling.make_model import make_model
-from modeling.fusion_part.HS_FACSS import HSFACSS, HierarchicalRollout
 from modeling.fusion_part.Frequency import Frequency_based_Token_Selection
-from modeling.fusion_part.TPM import FACR, ScoreBiasedCrossAttention
+from modeling.fusion_part.FACR import FACR, ScoreBiasedCrossAttention
+from modeling.fusion_part.HS import HS, PartAttention
 from modeling.fusion_part.CrossModalReconstruction import \
     SharedCrossModalTokenReconstruction
 from solver.make_optimizer import make_optimizer
@@ -140,9 +139,7 @@ def test_defaults_load():
     print('[1] cfg defaults clone+freeze')
     c = default_cfg.clone()
     c.freeze()
-    assert c.MODEL.AGF in (0, 1)
     assert c.MODEL.HS_ENABLED in (0, 1)
-    assert c.MODEL.FACSS_ENABLED in (0, 1)
     assert c.MODEL.FREQUENCY_ENABLED in (0, 1)
     assert not c.MODEL.CROSS_MODAL_RECON_ENABLED
     print('     OK')
@@ -154,8 +151,8 @@ def test_yml_configs_merge():
         c = default_cfg.clone()
         c.merge_from_file(y)
         c.freeze()
-        print('     OK: {}  AGF={} AL={}'.format(
-            y, c.MODEL.AGF, c.MODEL.AL))
+        print('     OK: {}  HS={} AL={}'.format(
+            y, c.MODEL.HS_ENABLED, c.MODEL.AL))
 
 
 def test_iteration_scheduler():
@@ -333,8 +330,8 @@ def test_ablation_switches():
     print('[8] ablation switches')
     base_yml = 'configs/RGBNT201/default.yml'
     matrix = [
-        {'MODEL.AGF': 0, 'MODEL.OCFR': 0},
-        {'MODEL.AGF': 1, 'MODEL.OCFR': 1},
+        {'MODEL.HS_ENABLED': 0, 'MODEL.OCFR': 0},
+        {'MODEL.HS_ENABLED': 1, 'MODEL.OCFR': 1},
     ]
     for m in matrix:
         cfg = _make_cfg(base_yml, **m)
@@ -346,30 +343,27 @@ def test_ablation_switches():
         loss = _loss_assembly_like_processor(out)
         loss.backward()
         n_params = sum(p.numel() for p in model.parameters()) / 1e6
-        print('     OK  AGF={} OCFR={}  params={:.2f}M'.format(
-            m['MODEL.AGF'], m['MODEL.OCFR'], n_params))
+        print('     OK  HS={} OCFR={}  params={:.2f}M'.format(
+            m['MODEL.HS_ENABLED'], m['MODEL.OCFR'], n_params))
 
 
 def test_paper_config_matrix():
     print('[9] formal paper config matrix')
     expected = {
-        'M0': (0, 0, 0, 0.0),
-        'M1': (1, 0, 0, 0.15),
-        'M2': (1, 1, 0, 0.15),
-        'M3': (1, 1, 1, 0.15),
+        'M0': (0, 0, 0.0),
+        'M1': (1, 0, 0.15),
+        'M2': (1, 0, 0.15),
+        'M3': (1, 1, 0.15),
     }
     for row, values in expected.items():
         c = _make_paper_cfg(row)
         actual = (
             int(c.MODEL.HS_ENABLED),
-            int(c.MODEL.FACSS_ENABLED),
             int(c.MODEL.QUALITY_AWARE),
             float(c.MODEL.SELECTED_PATCH_BLEND_WEIGHT),
         )
         assert actual == values, '{} switches {} != {}'.format(row, actual, values)
         assert not c.MODEL.FREQUENCY_ENABLED
-        assert not c.MODEL.AGF
-        assert not c.MODEL.TPM
         assert not c.MODEL.FACR
         assert not c.MODEL.MODALITY_ADAPTER
         assert not c.MODEL.PART_BRANCH
@@ -385,8 +379,8 @@ def test_paper_config_matrix():
         assert c.SOLVER.TRAIN_EPOCHS == 20
         assert c.SOLVER.EVAL_PERIOD == 5
         c.freeze()
-        print('     OK {}  HS={} FACSS={} QAWF={}'.format(
-            row, actual[0], actual[1], actual[2]))
+        print('     OK {}  HS={} QAWF={}'.format(
+            row, actual[0], actual[1]))
 
 
 def _selection_inputs(dim=16, tokens=8, layers=3):
@@ -409,62 +403,48 @@ def _run_selector(selector, features, attentions):
     )
 
 
-def test_hs_facss_modes():
-    print('[10] explicit M0 / HS-only / HS+FACSS paths')
+def test_hs_selection_modes():
+    print('[10] HS selector modes: fixed ratio, learnable K, contracts')
     features, attentions = _selection_inputs()
 
-    c = default_cfg.clone()
-    c.MODEL.HS_ENABLED = 0
-    c.MODEL.FACSS_ENABLED = 0
-    bypass = HSFACSS(dim=16, cfg=c).eval()
-    bypass_out = _run_selector(bypass, features, attentions)
-    for original, selected in zip(features, bypass_out[:3]):
-        assert torch.equal(original, selected)
-    for mask in bypass_out[3]:
-        assert mask.all()
-    assert not hasattr(bypass, 'alpha_mlp')
-    assert not hasattr(bypass, 'k_mlp')
-    print('     OK M0 bypasses token selection')
-
-    c.MODEL.HS_ENABLED = 1
-    c.MODEL.FACSS_ENABLED = 0
-    c.MODEL.HS_LAYERS = [1, 2, 3]
-    c.MODEL.HS_K = 2
-    hs_only = HSFACSS(dim=16, cfg=c).eval()
-    hs_out = _run_selector(hs_only, features, attentions)
-    assert not hasattr(hs_only, 'alpha_mlp')
-    assert not hasattr(hs_only, 'k_mlp')
-    for selected, mask in zip(hs_out[:3], hs_out[3]):
-        assert (mask.sum(dim=1) >= 2).all()
-        assert (mask.sum(dim=1) <= 6).all()
+    selector = HS(ratio=0.5).eval()
+    out = _run_selector(selector, features, attentions)
+    keep = max(1, int(8 * 0.5))
+    for selected, mask in zip(out[:3], out[3]):
+        assert (mask.sum(dim=1) >= keep).all()
         dropped = selected[:, 1:, :][~mask]
         assert torch.count_nonzero(dropped) == 0
-    print('     OK M1 runs HS without FACSS parameters or cross-modal refinement')
+    print('     OK fixed-ratio union drops tokens outside the mask')
 
-    c.MODEL.FACSS_ENABLED = 1
-    c.MODEL.HS_LAYERS = [1]
-    c.MODEL.HS_K = 8
-    c.MODEL.FACSS_DYNAMIC_K = 0
-    c.MODEL.FACSS_K = 2
-    c.MODEL.FACSS_SOFT_RESIDUAL_WEIGHT = 0.0
-    c.MODEL.FACSS_STE = 0
-    c.MODEL.FACSS_MODALITY_UNION = 0
-    facss = HSFACSS(dim=16, cfg=c).eval()
-    facss_out = _run_selector(facss, features, attentions)
-    assert hasattr(facss, 'alpha_mlp')
-    assert hasattr(facss, 'k_mlp')
-    for mask in facss_out[3]:
-        assert torch.equal(mask.sum(dim=1), torch.full((BATCH,), 2))
-    print('     OK M2 applies FACSS fixed-K refinement on HS candidates')
+    full = selector(
+        RGB_feat=features[0], RGB_attn=attentions[0],
+        NIR_feat=features[1], NIR_attn=attentions[1],
+        TIR_feat=features[2], TIR_attn=attentions[2],
+        return_gates=True, return_residual_tokens=True)
+    assert len(full) == 6
+    assert all(token.shape == (BATCH, 16) for token in full[5])
+    print('     OK gates and residual tokens extend the selector contract')
 
-    c.MODEL.HS_ENABLED = 0
     try:
-        HSFACSS(dim=16, cfg=c)
+        selector(
+            RGB_feat=features[0], RGB_attn=attentions[0],
+            return_scores=True)
     except ValueError as exc:
-        assert 'requires MODEL.HS_ENABLED' in str(exc)
+        assert 'hard mask' in str(exc)
     else:
-        raise AssertionError('FACSS without HS should fail configuration validation')
-    print('     OK invalid FACSS-without-HS configuration is rejected')
+        raise AssertionError('HS must reject continuous score requests')
+    print('     OK continuous score requests are rejected')
+
+    learnable = HS(ratio=0.5, learnable_k=True, k_candidates=[1, 2, 4]).train()
+    learnable_out = _run_selector(learnable, features, attentions)
+    for selected, mask in zip(learnable_out[:3], learnable_out[3]):
+        assert (mask.sum(dim=1) >= 1).all()
+    budget = learnable.regularization_loss(learnable_out[0])
+    assert budget.ndim == 0 and torch.isfinite(budget)
+    learnable_out[0].sum().backward()
+    assert learnable.k_logits.grad is not None
+    assert torch.isfinite(learnable.k_logits.grad).all()
+    print('     OK learnable-K budget loss and k_logits gradients')
 
 
 def test_optimized_kernels_equivalent():
@@ -476,65 +456,25 @@ def test_optimized_kernels_equivalent():
         torch.softmax(torch.randn(3, 2, 9, 9), dim=-1)
         for _ in range(max(layers))
     ]
-    rollout = HierarchicalRollout(layers=layers, k=3)
-    mask_new, final_new, snapshots_new = rollout(attn_list)
-
-    eye = torch.eye(9).unsqueeze(0)
+    # Reference: full per-head rollout products A_L @ ... @ A_1.
     cumulative = None
-    snapshots_ref = {}
-    for layer, attn in enumerate(attn_list, start=1):
-        transition = 0.5 * attn.mean(dim=1) + 0.5 * eye
-        cumulative = transition if cumulative is None else transition @ cumulative
-        if layer in layers:
-            snapshots_ref[layer] = cumulative[:, 0, 1:]
-    mask_ref = torch.zeros_like(mask_new)
-    for layer in layers:
-        indices = snapshots_ref[layer].topk(3, dim=1).indices
-        mask_ref.scatter_(1, indices, True)
-    assert torch.equal(mask_new, mask_ref)
-    assert torch.allclose(final_new, snapshots_ref[max(layers)], atol=1e-6, rtol=1e-5)
-    for layer in layers:
-        assert torch.allclose(snapshots_new[layer], snapshots_ref[layer], atol=1e-6, rtol=1e-5)
+    for attn in attn_list:
+        cumulative = attn if cumulative is None else attn @ cumulative
+    rollout_ref = cumulative[:, :, 0, 1:]
+    rollout_new = PartAttention._rollout_cls(attn_list)
+    assert torch.allclose(rollout_new, rollout_ref, atol=1e-6, rtol=1e-5)
 
-    c = default_cfg.clone()
-    c.MODEL.HS_LAYERS = [1]
-    c.MODEL.HS_K = 8
-    c.MODEL.FACSS_DYNAMIC_K = 1
-    c.MODEL.FACSS_MIN_K = 1
-    c.MODEL.FACSS_MAX_K = 3
-    c.MODEL.FACSS_SOFT_RESIDUAL_WEIGHT = 0.0
-    c.MODEL.FACSS_STE = 0
-    c.MODEL.FACSS_MODALITY_UNION = 0
-    selector = HSFACSS(dim=16, cfg=c).eval()
-    features, attentions = _selection_inputs(dim=16, tokens=8, layers=1)
-    selected = _run_selector(selector, features, attentions)
-    for mask in selected[3]:
-        assert torch.equal(mask.sum(dim=1), torch.full((BATCH,), 2))
-
-    patches = {
-        'RGB': features[0][:, 1:],
-        'NIR': features[1][:, 1:],
-        'TIR': features[2][:, 1:],
-    }
-    quality = {
-        'RGB': torch.tensor([0.3, 0.7]),
-        'NIR': torch.tensor([0.5, 0.4]),
-        'TIR': torch.tensor([0.8, 0.6]),
-    }
-    cached = selector._cross_scores(patches, quality=quality)
-    for name in patches:
-        other_names = [other for other in patches if other != name]
-        reference_parts = []
-        for other in other_names:
-            left = torch.nn.functional.normalize(patches[name], dim=-1)
-            right = torch.nn.functional.normalize(patches[other], dim=-1)
-            cosine = (left @ right.transpose(-1, -2)).relu()
-            reference_parts.append(selector._pool_cross(cosine))
-        reference_parts = torch.stack(reference_parts, dim=1)
-        weights = torch.stack([quality[other] for other in other_names], dim=1).unsqueeze(-1)
-        weights = weights / (weights.sum(dim=1, keepdim=True) + 1e-6)
-        reference = (reference_parts * weights).sum(dim=1)
-        assert torch.allclose(cached[name], reference, atol=1e-6, rtol=1e-5)
+    # Fixed-ratio mask matches a per-head top-K union reference.
+    part = PartAttention(ratio=0.3).eval()
+    mask, saliency = part(attn_list)
+    keep = max(1, int(8 * 0.3))
+    indices = rollout_ref.topk(keep, dim=2).indices
+    mask_ref = torch.zeros_like(mask)
+    mask_ref.scatter_(1, indices.reshape(3, 2 * keep), True)
+    assert torch.equal(mask, mask_ref)
+    assert torch.allclose(
+        saliency, rollout_ref.mean(dim=1).clamp_min(0.0),
+        atol=1e-6, rtol=1e-5)
 
     frequency = Frequency_based_Token_Selection(keep=3, stride=4)
     inverse = torch.randn(5, 3, 16, 12)
@@ -550,7 +490,7 @@ def test_optimized_kernels_equivalent():
     mask_ref = torch.zeros_like(mask_fast)
     mask_ref.scatter_(1, idx, True)
     assert torch.equal(mask_fast, mask_ref)
-    print('     OK rollout, cached cosine, dynamic-K, and frequency mask')
+    print('     OK rollout, per-head union, and frequency mask')
 
 
 def test_optimizer_parameter_groups():
@@ -622,8 +562,7 @@ def test_facr_score_bias_starts_from_t2():
     assert t4.MODEL.FACR
     assert t4.MODEL.FACR_USE_MASKS
     assert not t4.MODEL.FACR_USE_SCORES
-    assert not t4.MODEL.FACSS_DYNAMIC_K
-    assert t4.MODEL.FACSS_K == 16
+    assert t4.MODEL.HS_ENABLED
     print('     OK initial output=T2; gain bounded at {:.3f}; mask is hard'.format(
         effective_gain))
 
@@ -666,11 +605,11 @@ def test_facr_route_balance_loss():
     cfg.merge_from_file(PAPER_BASE)
     cfg.merge_from_file(
         'configs/RGBNT201/fusion/t8_sfts_fixed_k16_route_balance.yml')
-    assert cfg.MODEL.SFTS_ENABLED
+    assert cfg.MODEL.HS_ENABLED
     assert cfg.MODEL.FACR
     assert cfg.MODEL.FACR_USE_MASKS
     assert cfg.MODEL.FACR_ROUTE_BALANCE_WEIGHT == 0.05
-    assert cfg.MODEL.SFTS_RATIO == 0.125
+    assert cfg.MODEL.HS_RATIO == 0.125
     print('     OK loss={:.6f}; route_grad={:.6f}'.format(
         balance_loss.item(), route_grad))
 
@@ -728,8 +667,8 @@ def test_facr_independent_masked_aggregation():
     cfg.merge_from_file(PAPER_BASE)
     cfg.merge_from_file(
         'configs/RGBNT201/fusion/t11_sfts_k1_independent_facr.yml')
-    assert cfg.MODEL.SFTS_ENABLED
-    assert cfg.MODEL.SFTS_RATIO == 0.0078125
+    assert cfg.MODEL.HS_ENABLED
+    assert cfg.MODEL.HS_RATIO == 0.0078125
     assert cfg.MODEL.FACR
     assert cfg.MODEL.FACR_USE_MASKS
     assert cfg.MODEL.FACR_INDEPENDENT_AGG
@@ -803,8 +742,8 @@ def test_shared_cross_modal_token_reconstruction():
     cfg.merge_from_file(PAPER_BASE)
     cfg.merge_from_file(
         'configs/RGBNT201/fusion/t12_sfts_k1_shared_token_recon.yml')
-    assert cfg.MODEL.SFTS_ENABLED
-    assert cfg.MODEL.SFTS_RATIO == 0.0078125
+    assert cfg.MODEL.HS_ENABLED
+    assert cfg.MODEL.HS_RATIO == 0.0078125
     assert cfg.MODEL.FACR and cfg.MODEL.FACR_USE_MASKS
     assert not cfg.MODEL.FACR_INDEPENDENT_AGG
     assert cfg.MODEL.CROSS_MODAL_RECON_ENABLED
@@ -891,12 +830,10 @@ def test_legacy_a2_quality_frequency():
     print('[18] legacy-style A2 quality-aware frequency path')
     c = _make_legacy_a2_cfg()
     assert c.MODEL.HS_ENABLED
-    assert c.MODEL.FACSS_ENABLED
     assert c.MODEL.QUALITY_AWARE
     assert c.MODEL.FREQUENCY_ENABLED
     assert c.MODEL.FREQUENCY_QUALITY_AWARE
     assert c.MODEL.FREQUENCY_KEEP == 10
-    assert not c.MODEL.AGF
     assert not c.MODEL.MODALITY_ADAPTER
     assert not c.MODEL.PART_BRANCH
     assert not c.MODEL.OCFR
@@ -957,7 +894,7 @@ def main():
     test_save_load_roundtrip()
     test_ablation_switches()
     test_paper_config_matrix()
-    test_hs_facss_modes()
+    test_hs_selection_modes()
     test_optimized_kernels_equivalent()
     test_optimizer_parameter_groups()
     test_facr_score_bias_starts_from_t2()

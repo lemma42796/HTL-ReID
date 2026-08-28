@@ -1,4 +1,3 @@
 # Ablation row M2 — Full (HS+FACSS + AGF). Same as the main result.
 # Apply on top of configs/RGBNT201/default.yml.
 MODEL:
-  AGF: 1

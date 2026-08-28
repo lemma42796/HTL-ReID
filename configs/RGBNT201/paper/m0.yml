@@ -1,6 +1,5 @@
 # M0: shared-weight ViT-B/16 baseline; all patch tokens pass through unchanged.
 MODEL:
   HS_ENABLED: 0
-  FACSS_ENABLED: 0
   QUALITY_AWARE: 0
   SELECTED_PATCH_BLEND_WEIGHT: 0.0

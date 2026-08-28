@@ -2,10 +2,8 @@
 # This isolates routing from selection. Merge after paper/base.yml.
 MODEL:
   HS_ENABLED: 0
-  FACSS_ENABLED: 0
   QUALITY_AWARE: 0
   SELECTED_PATCH_BLEND_WEIGHT: 0.0
-  TPM: 0
   FACR: 1
   FACR_USE_SCORES: 0
   FACR_NUM_HEADS: 12

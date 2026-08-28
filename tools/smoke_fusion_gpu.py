@@ -95,19 +95,12 @@ def smoke(row, batch, height, width):
         raise AssertionError('{} produced NaN/Inf'.format(row))
     fusion_parameters = [
         parameter for name, parameter in model.named_parameters()
-        if ('TPM' in name or 'FACR' in name) and parameter.requires_grad
+        if 'FACR' in name and parameter.requires_grad
     ]
     if not fusion_parameters or not all(parameter.grad is not None for parameter in fusion_parameters):
         raise AssertionError('{} fusion parameters did not all receive gradients'.format(row))
-    if cfg.MODEL.FACR and cfg.MODEL.FACR_USE_SCORES:
-        score_parameters = [
-            parameter for name, parameter in model.named_parameters()
-            if 'HS_FACSS.alpha_mlp' in name and parameter.requires_grad
-        ]
-        if not score_parameters or not all(parameter.grad is not None for parameter in score_parameters):
-            raise AssertionError('{} FACSS score networks did not receive gradients'.format(row))
-    if cfg.MODEL.SFTS_LEARNABLE_K:
-        k_logits = model.SFTS.k_logits
+    if cfg.MODEL.HS_LEARNABLE_K:
+        k_logits = model.HS.k_logits
         if (k_logits.grad is None or not torch.isfinite(k_logits.grad).all() or
                 k_logits.grad.abs().sum() == 0):
             raise AssertionError(
