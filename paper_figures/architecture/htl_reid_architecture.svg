@@ -1,426 +1,86 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1080" viewBox="0 0 1800 1080" role="img" aria-labelledby="title desc">
-  <title id="title">HTL-ReID overall architecture</title>
-  <desc id="desc">RGB, NIR, and TIR images pass through a shared ViT backbone. Hierarchical Selection combines attention rollout and a frequency mask. Adaptive Cross-modal Interaction uses complete backbone tokens under the HS mask, Part-aware Local Representation pools HS-selected patches, and Dynamic Heterogeneous Fusion independently processes seven full-token routes. Four normalized descriptors are weighted and concatenated.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1900" height="1060" viewBox="0 0 1900 1060">
+<title>Overall architecture of HTL-ReID</title>
+<desc>Shared ViT encoding of RGB, NIR and TIR; HS token selection; three-stage mask-constrained ACI; PLR from selected patches; seven-route DHF from complete tokens; weighted descriptor concatenation.</desc>
+<defs>
+ <style>
+ text{font-family:"Times New Roman",Times,serif;fill:#222}.mt{font-size:25px;font-weight:700}.st{font-size:18px;font-weight:700}.lb{font-size:16px;font-weight:700}.tx{font-size:14px}.sm{font-size:12px}.tn{font-size:10.5px}
+ .grp{fill:#fff;stroke:#666;stroke-width:1.7;stroke-dasharray:8 6}.neu{fill:#f3f3f3;stroke:#777;stroke-width:1.35}.r{fill:#ddeed7;stroke:#72a866;stroke-width:1.5}.n{fill:#dfeaf6;stroke:#6d98c5;stroke-width:1.5}.t{fill:#f6dcd8;stroke:#d47469;stroke-width:1.5}.h{fill:#e9ddf0;stroke:#9272a1;stroke-width:1.5}.sel{fill:#fff49a;stroke:#d8be22;stroke-width:1.5}.exp{fill:#f9e7b7;stroke:#d3a646;stroke-width:1.35}.w{fill:#fff;stroke:#777;stroke-width:1.25}
+ .f{fill:none;stroke:#222;stroke-width:1.7;marker-end:url(#a)}.th{fill:none;stroke:#444;stroke-width:1.2;marker-end:url(#as)}.mf{fill:none;stroke:#9272a1;stroke-width:1.5;stroke-dasharray:5 4;marker-end:url(#ap)}.rl{fill:none;stroke:#72a866;stroke-width:1.7;marker-end:url(#ar)}.nl{fill:none;stroke:#6d98c5;stroke-width:1.7;marker-end:url(#an)}.tl{fill:none;stroke:#d47469;stroke-width:1.7;marker-end:url(#at)}.mut{fill:#777}
+ </style>
+ <marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#222"/></marker>
+ <marker id="as" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5 0 7Z" fill="#444"/></marker>
+ <marker id="ap" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#9272a1"/></marker>
+ <marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#72a866"/></marker><marker id="an" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#6d98c5"/></marker><marker id="at" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#d47469"/></marker>
+ <g id="grid"><rect width="34" height="34" fill="#fff" stroke="#777"/><path d="M11.3 0V34M22.7 0V34M0 11.3H34M0 22.7H34" stroke="#aaa" stroke-width=".8"/></g>
+ <g id="sgrid"><use xlink:href="#grid"/><rect x="1" y="1" width="10" height="10" class="sel"/><rect x="23" y="1" width="10" height="10" class="sel"/><rect x="12" y="12" width="10" height="10" class="sel"/><rect x="1" y="23" width="10" height="10" class="sel"/></g>
+ <g id="aciStage"><rect width="190" height="178" rx="3" class="w"/><circle cx="48" cy="67" r="18" class="r"/><text x="48" y="72" text-anchor="middle" class="lb">R</text><circle cx="142" cy="67" r="18" class="n"/><text x="142" y="72" text-anchor="middle" class="lb">N</text><circle cx="95" cy="133" r="18" class="t"/><text x="95" y="138" text-anchor="middle" class="lb">T</text><path d="M67 67H122" class="rl"/><path d="M131 82L108 117" class="nl"/><path d="M82 117L59 82" class="tl"/><text x="95" y="166" text-anchor="middle" class="tn">adaptive routing + gated residual</text></g>
+ <g id="dhfTail"><path d="M90 22H121" class="th"/><rect x="122" y="5" width="145" height="34" rx="2" class="neu"/><text x="194" y="27" text-anchor="middle" class="sm">Cross Attn.</text><path d="M267 22H298" class="th"/><rect x="299" y="5" width="112" height="34" rx="2" class="exp"/><text x="355" y="27" text-anchor="middle" class="sm">Expert</text><path d="M411 22H440" class="th"/><rect x="441" y="5" width="99" height="34" rx="17" class="exp"/><text x="490" y="27" text-anchor="middle" class="sm">Gate</text></g>
+</defs>
+<rect width="1900" height="1060" fill="#fff"/>
 
-  <defs>
-    <linearGradient id="rgbFrame" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#dcefff"/>
-      <stop offset="0.48" stop-color="#f7fbff"/>
-      <stop offset="1" stop-color="#ffd9cc"/>
-    </linearGradient>
-    <linearGradient id="nirFrame" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#d8e2ea"/>
-      <stop offset="1" stop-color="#f5f7f9"/>
-    </linearGradient>
-    <linearGradient id="tirFrame" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0" stop-color="#1f2740"/>
-      <stop offset="0.55" stop-color="#55446f"/>
-      <stop offset="1" stop-color="#ef9967"/>
-    </linearGradient>
-    <linearGradient id="fusionGradient" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f3f0ff"/>
-      <stop offset="1" stop-color="#faf9ff"/>
-    </linearGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#17324d" flood-opacity="0.10"/>
-    </filter>
-    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0 L8,4 L0,8 Z" fill="#29465f"/>
-    </marker>
-    <marker id="arrowPurple" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0 L8,4 L0,8 Z" fill="#6b5ac7"/>
-    </marker>
-    <marker id="arrowTeal" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0 L8,4 L0,8 Z" fill="#168b7b"/>
-    </marker>
-    <style>
-      .title { font: 700 34px Arial, Helvetica, sans-serif; fill: #142f47; letter-spacing: .2px; }
-      .subtitle { font: 400 16px Arial, Helvetica, sans-serif; fill: #647789; }
-      .module-title { font: 700 22px Arial, Helvetica, sans-serif; fill: #17324d; }
-      .module-sub { font: 400 13px Arial, Helvetica, sans-serif; fill: #607487; }
-      .label { font: 600 14px Arial, Helvetica, sans-serif; fill: #25445d; }
-      .small { font: 400 12px Arial, Helvetica, sans-serif; fill: #607487; }
-      .tiny { font: 600 10.5px Arial, Helvetica, sans-serif; fill: #435b70; }
-      .white-label { font: 700 13px Arial, Helvetica, sans-serif; fill: white; }
-      .module { fill: white; stroke: #cad6df; stroke-width: 1.5; filter: url(#shadow); }
-      .flow { fill: none; stroke: #29465f; stroke-width: 2.2; marker-end: url(#arrow); }
-      .flow-soft { fill: none; stroke: #7d91a3; stroke-width: 1.8; marker-end: url(#arrow); }
-      .flow-mask { fill: none; stroke: #6b5ac7; stroke-width: 2.2; stroke-dasharray: 7 5; marker-end: url(#arrowPurple); }
-      .flow-selected { fill: none; stroke: #168b7b; stroke-width: 2.2; marker-end: url(#arrowTeal); }
-      .hairline { fill: none; stroke: #9bb0c0; stroke-width: 1.25; }
-      .token { stroke: white; stroke-width: 1; }
-    </style>
-  </defs>
+<!-- restrained color legend -->
+<g transform="translate(25 18)"><rect width="18" height="12" class="r"/><text x="24" y="11" class="sm">RGB</text><rect x="74" width="18" height="12" class="n"/><text x="98" y="11" class="sm">NIR</text><rect x="147" width="18" height="12" class="t"/><text x="171" y="11" class="sm">TIR</text><rect x="218" width="18" height="12" class="h"/><text x="242" y="11" class="sm">selection</text><rect x="326" width="18" height="12" class="sel"/><text x="350" y="11" class="sm">selected token / union</text><rect x="499" width="18" height="12" class="exp"/><text x="523" y="11" class="sm">expert / gate</text><path d="M625 6H662" class="mf"/><text x="670" y="11" class="sm">HS-mask constraint</text></g>
 
-  <rect x="0" y="0" width="1800" height="1080" fill="#ffffff"/>
-  <text class="title" x="48" y="53">HTL-ReID: Hierarchical Token Learning for RGB-NIR-TIR Re-Identification</text>
-  <text class="subtitle" x="49" y="81">Shared encoding, mask-guided interaction, local representation, and independent heterogeneous fusion</text>
+<!-- local real RGB/NIR/TIR triplet -->
+<g><text x="72" y="62" text-anchor="middle" class="st">Input</text>
+ <image x="23" y="78" width="98" height="188" preserveAspectRatio="xMidYMid slice" xlink:href="input_rgb.png"/><rect x="23" y="78" width="98" height="188" fill="none" stroke="#72a866" stroke-width="3"/><text x="72" y="287" text-anchor="middle" class="lb" fill="#548a4b">RGB</text>
+ <image x="23" y="318" width="98" height="188" preserveAspectRatio="xMidYMid slice" xlink:href="input_nir.png"/><rect x="23" y="318" width="98" height="188" fill="none" stroke="#6d98c5" stroke-width="3"/><text x="72" y="527" text-anchor="middle" class="lb" fill="#527ca7">NIR</text>
+ <image x="23" y="558" width="98" height="188" preserveAspectRatio="xMidYMid slice" xlink:href="input_tir.png"/><rect x="23" y="558" width="98" height="188" fill="none" stroke="#d47469" stroke-width="3"/><text x="72" y="767" text-anchor="middle" class="lb" fill="#bd5e54">TIR</text>
+</g>
 
-  <!-- Input modalities -->
-  <g id="inputs">
-    <text class="label" x="46" y="123">MULTI-MODAL INPUT</text>
+<!-- shared backbone -->
+<g><rect x="154" y="58" width="205" height="724" rx="4" class="grp"/><text x="256" y="88" text-anchor="middle" class="st">Shared ViT Backbone</text><text x="256" y="107" text-anchor="middle" class="sm">weight sharing</text>
+ <path d="M121 174H174" class="rl"/><path d="M121 414H174" class="nl"/><path d="M121 654H174" class="tl"/>
+ <g transform="translate(176 130)"><rect width="160" height="72" rx="3" class="r"/><text x="80" y="28" text-anchor="middle" class="lb">Patch Embedding</text><text x="80" y="49" text-anchor="middle" class="sm">[CLS] + patches</text><use xlink:href="#grid" x="63" y="84"/><path d="M80 72V80" class="th"/></g>
+ <g transform="translate(176 370)"><rect width="160" height="72" rx="3" class="n"/><text x="80" y="28" text-anchor="middle" class="lb">Patch Embedding</text><text x="80" y="49" text-anchor="middle" class="sm">[CLS] + patches</text><use xlink:href="#grid" x="63" y="84"/><path d="M80 72V80" class="th"/></g>
+ <g transform="translate(176 610)"><rect width="160" height="72" rx="3" class="t"/><text x="80" y="28" text-anchor="middle" class="lb">Patch Embedding</text><text x="80" y="49" text-anchor="middle" class="sm">[CLS] + patches</text><use xlink:href="#grid" x="63" y="84"/><path d="M80 72V80" class="th"/></g>
+ <g class="neu"><rect x="188" y="247" width="136" height="58" rx="3"/><rect x="188" y="487" width="136" height="58" rx="3"/><rect x="188" y="727" width="136" height="38" rx="3"/></g>
+ <text x="256" y="272" text-anchor="middle" class="lb">Transformer</text><text x="256" y="292" text-anchor="middle" class="sm">shared parameters</text><text x="256" y="512" text-anchor="middle" class="lb">Transformer</text><text x="256" y="532" text-anchor="middle" class="sm">shared parameters</text><text x="256" y="751" text-anchor="middle" class="lb">Transformer</text><path d="M256 248V218M256 488V458M256 728V698" class="th"/>
+</g>
 
-    <g id="rgb-input" transform="translate(42 150)">
-      <rect width="126" height="108" rx="12" fill="url(#rgbFrame)" stroke="#86afd1" stroke-width="1.5"/>
-      <rect x="10" y="10" width="106" height="70" rx="7" fill="#eaf5ff" opacity=".65"/>
-      <path d="M10 60 L35 39 L57 55 L82 28 L116 58 L116 80 L10 80 Z" fill="#7fb5d8" opacity=".55"/>
-      <circle cx="65" cy="29" r="9" fill="#d26653"/>
-      <path d="M53 72 C54 51 58 40 65 40 C73 40 78 52 78 72 Z" fill="#d26653"/>
-      <text class="label" x="63" y="99" text-anchor="middle">RGB</text>
-    </g>
+<!-- HS -->
+<g><rect x="392" y="58" width="346" height="306" rx="4" class="grp"/><text x="565" y="88" text-anchor="middle" class="mt">HS</text><text x="565" y="108" text-anchor="middle" class="sm">complete token selection</text>
+ <path d="M359 166H414M359 276H414" class="f"/><rect x="414" y="128" width="138" height="70" rx="3" class="h"/><text x="483" y="155" text-anchor="middle" class="lb">Attention Rollout</text><text x="483" y="176" text-anchor="middle" class="sm">head-wise top-K union</text><rect x="414" y="238" width="138" height="70" rx="3" class="h"/><text x="483" y="265" text-anchor="middle" class="lb">Frequency Mask</text><text x="483" y="286" text-anchor="middle" class="sm">4-level Haar DWT</text>
+ <path d="M552 163H592V192M552 273H592V242" class="th"/><circle cx="592" cy="217" r="25" class="sel"/><text x="592" y="222" text-anchor="middle" class="lb">OR</text><path d="M617 217H651" class="f"/><use xlink:href="#sgrid" x="659" y="200"/><text x="676" y="252" text-anchor="middle" class="sm">shared hard mask</text><text x="565" y="340" text-anchor="middle" class="sm">rollout ∪ frequency evidence → selected patches</text>
+</g>
 
-    <g id="nir-input" transform="translate(42 286)">
-      <rect width="126" height="108" rx="12" fill="url(#nirFrame)" stroke="#8fa2b0" stroke-width="1.5"/>
-      <rect x="10" y="10" width="106" height="70" rx="7" fill="#e6edf1"/>
-      <path d="M10 61 L35 38 L57 54 L83 27 L116 58 L116 80 L10 80 Z" fill="#a7b7c1"/>
-      <circle cx="65" cy="29" r="9" fill="#566a78"/>
-      <path d="M53 72 C54 51 58 40 65 40 C73 40 78 52 78 72 Z" fill="#566a78"/>
-      <text class="label" x="63" y="99" text-anchor="middle">NIR</text>
-    </g>
+<!-- ACI -->
+<g><rect x="768" y="58" width="726" height="306" rx="4" class="grp"/><text x="1131" y="88" text-anchor="middle" class="mt">ACI</text><text x="1131" y="108" text-anchor="middle" class="sm">adaptive cross-modal interaction on complete backbone tokens</text>
+ <path d="M359 384H1512" fill="none" stroke="#222" stroke-width="1.7"/><text x="562" y="379" text-anchor="middle" class="sm">complete RGB / NIR / TIR token bus</text><path d="M755 384V145H795" class="f"/><path d="M693 235V125H846" class="mf"/>
+ <g transform="translate(798 132)"><use xlink:href="#aciStage"/><text x="95" y="24" text-anchor="middle" class="lb">Stage 1</text></g><path d="M988 221H1019" class="f"/>
+ <g transform="translate(1020 132)"><use xlink:href="#aciStage"/><text x="95" y="24" text-anchor="middle" class="lb">Stage 2</text></g><path d="M1210 221H1241" class="f"/>
+ <g transform="translate(1242 132)"><use xlink:href="#aciStage"/><text x="95" y="24" text-anchor="middle" class="lb">Stage 3</text></g><path d="M1432 221H1475" class="f"/><text x="1476" y="211" class="tn">3d</text>
+</g>
 
-    <g id="tir-input" transform="translate(42 422)">
-      <rect width="126" height="108" rx="12" fill="url(#tirFrame)" stroke="#8f6c8d" stroke-width="1.5"/>
-      <rect x="10" y="10" width="106" height="70" rx="7" fill="#27304b" opacity=".66"/>
-      <circle cx="65" cy="28" r="9" fill="#ffd166"/>
-      <path d="M52 72 C54 50 58 40 65 40 C73 40 78 51 79 72 Z" fill="#ff885e"/>
-      <path d="M18 69 C36 53 46 57 57 69" fill="none" stroke="#a95e87" stroke-width="5" opacity=".55"/>
-      <text x="63" y="99" text-anchor="middle" style="font:600 14px Arial,Helvetica,sans-serif;fill:#ffffff">TIR</text>
-    </g>
-  </g>
+<!-- PLR -->
+<g><rect x="392" y="402" width="424" height="350" rx="4" class="grp"/><text x="604" y="432" text-anchor="middle" class="mt">PLR</text><text x="604" y="452" text-anchor="middle" class="sm">independent local representation from HS-selected patches</text><path d="M693 234V384H424V485" class="mf"/>
+ <g transform="translate(425 478)"><text y="26" class="lb" fill="#548a4b">RGB</text><use xlink:href="#sgrid" x="51" y="2"/><path d="M93 19H123" class="th"/><g class="r"><rect x="124" width="42" height="12"/><rect x="124" y="14" width="42" height="12"/><rect x="124" y="28" width="42" height="12"/></g><text x="145" y="58" text-anchor="middle" class="tn">3 stripes</text><path d="M168 20H204" class="th"/><rect x="205" y="5" width="108" height="30" class="r"/><text x="259" y="25" text-anchor="middle" class="sm">local features</text></g>
+ <g transform="translate(425 563)"><text y="26" class="lb" fill="#527ca7">NIR</text><use xlink:href="#sgrid" x="51" y="2"/><path d="M93 19H123" class="th"/><g class="n"><rect x="124" width="42" height="12"/><rect x="124" y="14" width="42" height="12"/><rect x="124" y="28" width="42" height="12"/></g><text x="145" y="58" text-anchor="middle" class="tn">3 stripes</text><path d="M168 20H204" class="th"/><rect x="205" y="5" width="108" height="30" class="n"/><text x="259" y="25" text-anchor="middle" class="sm">local features</text></g>
+ <g transform="translate(425 648)"><text y="26" class="lb" fill="#bd5e54">TIR</text><use xlink:href="#sgrid" x="51" y="2"/><path d="M93 19H123" class="th"/><g class="t"><rect x="124" width="42" height="12"/><rect x="124" y="14" width="42" height="12"/><rect x="124" y="28" width="42" height="12"/></g><text x="145" y="58" text-anchor="middle" class="tn">3 stripes</text><path d="M168 20H204" class="th"/><rect x="205" y="5" width="108" height="30" class="t"/><text x="259" y="25" text-anchor="middle" class="sm">local features</text></g>
+ <path d="M738 498H776V670M738 583H776M738 668H776" class="th"/><circle cx="776" cy="690" r="20" class="w"/><text x="776" y="695" text-anchor="middle" class="lb">C</text><text x="776" y="726" text-anchor="middle" class="sm">9d</text>
+</g>
 
-  <!-- Shared ViT backbone -->
-  <g id="shared-backbone">
-    <rect class="module" x="218" y="126" width="230" height="432" rx="18"/>
-    <rect x="218" y="126" width="230" height="62" rx="18" fill="#eaf2f8"/>
-    <path d="M218 170 L448 170 L448 188 L218 188 Z" fill="#eaf2f8"/>
-    <text class="module-title" x="333" y="154" text-anchor="middle">Shared ViT Backbone</text>
-    <text class="module-sub" x="333" y="177" text-anchor="middle">same parameters for all modalities</text>
+<!-- DHF seven routes -->
+<g><rect x="846" y="402" width="648" height="594" rx="4" class="grp"/><text x="1170" y="432" text-anchor="middle" class="mt">DHF</text><text x="1170" y="452" text-anchor="middle" class="sm">independent heterogeneous fusion of complete backbone tokens</text><path d="M826 384V520H873" class="f"/>
+ <text x="893" y="482" class="sm">route</text><text x="1048" y="482" class="sm">route-token attention</text><text x="1236" y="482" class="sm">residual expert</text><text x="1384" y="482" class="sm">4-head gate</text>
+ <g transform="translate(875 498)"><rect width="90" height="44" class="r"/><text x="45" y="27" text-anchor="middle" class="lb">RGB</text><use xlink:href="#dhfTail"/><text x="558" y="27" class="lb">× α₁</text></g>
+ <g transform="translate(875 565)"><rect width="90" height="44" class="n"/><text x="45" y="27" text-anchor="middle" class="lb">NIR</text><use xlink:href="#dhfTail"/><text x="558" y="27" class="lb">× α₂</text></g>
+ <g transform="translate(875 632)"><rect width="90" height="44" class="t"/><text x="45" y="27" text-anchor="middle" class="lb">TIR</text><use xlink:href="#dhfTail"/><text x="558" y="27" class="lb">× α₃</text></g>
+ <g transform="translate(875 699)"><rect width="45" height="44" class="r"/><rect x="45" width="45" height="44" class="n"/><text x="45" y="27" text-anchor="middle" class="lb">R+N</text><use xlink:href="#dhfTail"/><text x="558" y="27" class="lb">× α₄</text></g>
+ <g transform="translate(875 766)"><rect width="45" height="44" class="r"/><rect x="45" width="45" height="44" class="t"/><text x="45" y="27" text-anchor="middle" class="lb">R+T</text><use xlink:href="#dhfTail"/><text x="558" y="27" class="lb">× α₅</text></g>
+ <g transform="translate(875 833)"><rect width="45" height="44" class="n"/><rect x="45" width="45" height="44" class="t"/><text x="45" y="27" text-anchor="middle" class="lb">N+T</text><use xlink:href="#dhfTail"/><text x="558" y="27" class="lb">× α₆</text></g>
+ <g transform="translate(875 900)"><rect width="30" height="44" class="r"/><rect x="30" width="30" height="44" class="n"/><rect x="60" width="30" height="44" class="t"/><text x="45" y="27" text-anchor="middle" class="lb">All</text><use xlink:href="#dhfTail"/><text x="558" y="27" class="lb">× α₇</text></g>
+ <path d="M1460 520H1475V927M1460 587H1475M1460 654H1475M1460 721H1475M1460 788H1475M1460 855H1475" class="th"/><circle cx="1475" cy="950" r="18" class="w"/><text x="1475" y="955" text-anchor="middle" class="lb">C</text><text x="1475" y="980" text-anchor="middle" class="sm">7d</text>
+</g>
 
-    <g transform="translate(250 216)">
-      <rect x="0" y="0" width="166" height="52" rx="9" fill="#f6f9fb" stroke="#b9cad6"/>
-      <rect x="10" y="10" width="22" height="32" rx="4" fill="#8ab4d4"/>
-      <path d="M42 16 H146 M42 26 H146 M42 36 H122" stroke="#7790a2" stroke-width="3" stroke-linecap="round"/>
-      <text class="tiny" x="83" y="49" text-anchor="middle">patch embedding + [CLS]</text>
-    </g>
-
-    <g transform="translate(261 296)">
-      <rect x="0" y="0" width="144" height="48" rx="9" fill="#e8eff8" stroke="#9db4c8"/>
-      <rect x="13" y="14" width="144" height="48" rx="9" fill="#f2f6fa" stroke="#b6c5d1"/>
-      <rect x="26" y="28" width="144" height="48" rx="9" fill="#ffffff" stroke="#b6c5d1"/>
-      <text class="label" x="98" y="49" text-anchor="middle">Transformer blocks</text>
-      <text class="small" x="98" y="67" text-anchor="middle">MSA + MLP</text>
-      <text class="tiny" x="142" y="92" text-anchor="end">x L shared layers</text>
-    </g>
-
-    <g transform="translate(259 438)">
-      <rect x="0" y="0" width="148" height="74" rx="10" fill="#f8fafb" stroke="#c5d2dc"/>
-      <path d="M18 19 H130 M18 37 H130 M18 55 H130" stroke="#8299aa" stroke-width="2"/>
-      <circle cx="28" cy="19" r="5" fill="#3e83b7"/>
-      <circle cx="28" cy="37" r="5" fill="#718796"/>
-      <circle cx="28" cy="55" r="5" fill="#d66a58"/>
-      <text class="small" x="77" y="69" text-anchor="middle">tokens + layer attentions</text>
-    </g>
-  </g>
-
-  <!-- Input to shared backbone arrows -->
-  <path class="flow-soft" d="M168 204 H218"/>
-  <path class="flow-soft" d="M168 340 H192 V342 H218"/>
-  <path class="flow-soft" d="M168 476 H192 V480 H218"/>
-
-  <!-- Backbone token lanes -->
-  <g id="backbone-tokens">
-    <text class="label" x="565" y="123" text-anchor="middle">BACKBONE TOKENS</text>
-    <rect x="480" y="148" width="176" height="92" rx="12" fill="#f7fbfe" stroke="#9dbdd5"/>
-    <text class="label" x="499" y="171">RGB</text>
-    <rect class="token" x="500" y="186" width="31" height="31" rx="5" fill="#3e83b7"/>
-    <text class="white-label" x="516" y="207" text-anchor="middle" style="font-size:10px">CLS</text>
-    <g fill="#9dc4df">
-      <rect class="token" x="538" y="186" width="21" height="31" rx="4"/><rect class="token" x="561" y="186" width="21" height="31" rx="4"/>
-      <rect class="token" x="584" y="186" width="21" height="31" rx="4"/><rect class="token" x="607" y="186" width="21" height="31" rx="4"/>
-    </g>
-    <circle cx="638" cy="201" r="2.5" fill="#8ea4b4"/><circle cx="646" cy="201" r="2.5" fill="#8ea4b4"/>
-
-    <rect x="480" y="284" width="176" height="92" rx="12" fill="#f7f9fa" stroke="#aebdc7"/>
-    <text class="label" x="499" y="307">NIR</text>
-    <rect class="token" x="500" y="322" width="31" height="31" rx="5" fill="#667d8c"/>
-    <text class="white-label" x="516" y="343" text-anchor="middle" style="font-size:10px">CLS</text>
-    <g fill="#b6c2ca">
-      <rect class="token" x="538" y="322" width="21" height="31" rx="4"/><rect class="token" x="561" y="322" width="21" height="31" rx="4"/>
-      <rect class="token" x="584" y="322" width="21" height="31" rx="4"/><rect class="token" x="607" y="322" width="21" height="31" rx="4"/>
-    </g>
-    <circle cx="638" cy="337" r="2.5" fill="#8ea4b4"/><circle cx="646" cy="337" r="2.5" fill="#8ea4b4"/>
-
-    <rect x="480" y="420" width="176" height="92" rx="12" fill="#fff8f5" stroke="#d8aa9c"/>
-    <text class="label" x="499" y="443">TIR</text>
-    <rect class="token" x="500" y="458" width="31" height="31" rx="5" fill="#d66a58"/>
-    <text class="white-label" x="516" y="479" text-anchor="middle" style="font-size:10px">CLS</text>
-    <g fill="#e8ab9e">
-      <rect class="token" x="538" y="458" width="21" height="31" rx="4"/><rect class="token" x="561" y="458" width="21" height="31" rx="4"/>
-      <rect class="token" x="584" y="458" width="21" height="31" rx="4"/><rect class="token" x="607" y="458" width="21" height="31" rx="4"/>
-    </g>
-    <circle cx="638" cy="473" r="2.5" fill="#8ea4b4"/><circle cx="646" cy="473" r="2.5" fill="#8ea4b4"/>
-  </g>
-
-  <path class="flow-soft" d="M448 204 H480"/>
-  <path class="flow-soft" d="M448 340 H480"/>
-  <path class="flow-soft" d="M448 476 H480"/>
-
-  <!-- Full-token paths: ACI and DHF bypass token pruning -->
-  <path class="flow" d="M656 194 H674 V96 H1068 V151 H1086"/>
-  <rect x="746" y="77" width="228" height="28" rx="14" fill="#ffffff" stroke="#9fb1bf"/>
-  <text class="tiny" x="860" y="96" text-anchor="middle">complete RGB / NIR / TIR tokens</text>
-
-  <path class="flow" d="M656 468 H676 V852 H714"/>
-  <rect x="611" y="611" width="187" height="28" rx="14" fill="#ffffff" stroke="#9fb1bf" transform="rotate(90 704.5 625)"/>
-  <text class="tiny" x="692" y="696" text-anchor="middle" transform="rotate(90 692 696)">independent full-token path</text>
-
-  <!-- HS module -->
-  <g id="hs-module">
-    <rect class="module" x="704" y="122" width="342" height="330" rx="18"/>
-    <rect x="704" y="122" width="342" height="61" rx="18" fill="#eefaf7"/>
-    <path d="M704 165 H1046 V183 H704 Z" fill="#eefaf7"/>
-    <circle cx="732" cy="151" r="17" fill="#168b7b"/>
-    <text class="white-label" x="732" y="156" text-anchor="middle">HS</text>
-    <text class="module-title" x="758" y="151">Hierarchical Selection</text>
-    <text class="module-sub" x="758" y="173">one shared hard patch mask</text>
-
-    <rect x="724" y="201" width="302" height="78" rx="10" fill="#f5f9fc" stroke="#b8c9d5"/>
-    <text class="tiny" x="740" y="220">ATTENTION BRANCH</text>
-    <rect x="739" y="232" width="78" height="30" rx="7" fill="#e6eef5" stroke="#b4c6d2"/>
-    <text class="tiny" x="778" y="251" text-anchor="middle">A1 ... AL</text>
-    <path class="hairline" d="M818 247 H836" marker-end="url(#arrow)"/>
-    <rect x="838" y="232" width="72" height="30" rx="7" fill="#e6eef5" stroke="#b4c6d2"/>
-    <text class="tiny" x="874" y="251" text-anchor="middle">CLS rollout</text>
-    <path class="hairline" d="M911 247 H929" marker-end="url(#arrow)"/>
-    <rect x="931" y="226" width="80" height="42" rx="7" fill="#dce9f2" stroke="#9eb7c8"/>
-    <text class="tiny" x="971" y="244" text-anchor="middle">top-K union</text>
-    <text class="small" x="971" y="259" text-anchor="middle" style="font-size:10px">heads + modes</text>
-
-    <rect x="724" y="293" width="302" height="78" rx="10" fill="#fff9f1" stroke="#e1c28e"/>
-    <text class="tiny" x="740" y="312">FREQUENCY BRANCH</text>
-    <rect x="739" y="324" width="78" height="30" rx="7" fill="#fff0d7" stroke="#dfbd82"/>
-    <text class="tiny" x="778" y="343" text-anchor="middle">3 images</text>
-    <path class="hairline" d="M818 339 H836" marker-end="url(#arrow)"/>
-    <rect x="838" y="324" width="72" height="30" rx="7" fill="#fff0d7" stroke="#dfbd82"/>
-    <text class="tiny" x="874" y="343" text-anchor="middle">Haar DWT</text>
-    <path class="hairline" d="M911 339 H929" marker-end="url(#arrow)"/>
-    <rect x="931" y="324" width="80" height="30" rx="7" fill="#ffe8c3" stroke="#d7ab62"/>
-    <text class="tiny" x="971" y="343" text-anchor="middle">freq. top-K</text>
-
-    <path d="M1011 247 H1018 V367" fill="none" stroke="#8aa0b0" stroke-width="1.6"/>
-    <path d="M1011 339 H1018 V367" fill="none" stroke="#c59442" stroke-width="1.6"/>
-    <circle cx="1018" cy="385" r="18" fill="#ffffff" stroke="#168b7b" stroke-width="2"/>
-    <text x="1018" y="391" text-anchor="middle" style="font:700 19px Arial,Helvetica,sans-serif;fill:#168b7b">OR</text>
-    <path class="flow-selected" d="M1000 385 H992"/>
-    <rect x="922" y="366" width="70" height="38" rx="9" fill="#dff5ef" stroke="#69b7aa"/>
-    <text class="tiny" x="957" y="382" text-anchor="middle">shared</text>
-    <text class="label" x="957" y="397" text-anchor="middle" style="font-size:12px">M_HS</text>
-    <text class="small" x="875" y="430" text-anchor="middle">rollout mask OR frequency mask = complete HS selection</text>
-  </g>
-
-  <!-- Backbone attention input and raw-image frequency input -->
-  <path class="flow-soft" d="M656 330 H681 V239 H704"/>
-  <text class="tiny" x="690" y="260" text-anchor="end">layer attentions</text>
-  <path class="flow-soft" d="M168 518 H185 V582 H683 V338 H704"/>
-  <rect x="385" y="564" width="160" height="28" rx="14" fill="#ffffff" stroke="#d3b578"/>
-  <text class="tiny" x="465" y="583" text-anchor="middle">RGB / NIR / TIR images</text>
-
-  <!-- ACI module -->
-  <g id="aci-module">
-    <rect class="module" x="1086" y="122" width="356" height="330" rx="18"/>
-    <rect x="1086" y="122" width="356" height="61" rx="18" fill="#f1effb"/>
-    <path d="M1086 165 H1442 V183 H1086 Z" fill="#f1effb"/>
-    <circle cx="1114" cy="151" r="17" fill="#6b5ac7"/>
-    <text class="white-label" x="1114" y="156" text-anchor="middle">ACI</text>
-    <text class="module-title" x="1141" y="151">Adaptive Cross-modal Interaction</text>
-    <text class="module-sub" x="1141" y="173">full tokens, constrained by M_HS</text>
-
-    <g transform="translate(1108 201)">
-      <rect x="0" y="0" width="312" height="39" rx="9" fill="#faf9fe" stroke="#c9c3e7"/>
-      <text class="small" x="156" y="16" text-anchor="middle">Each target CLS attends to both other modalities</text>
-      <text class="tiny" x="156" y="31" text-anchor="middle">sample-adaptive routing + gated residual update</text>
-    </g>
-
-    <g id="aci-stage-1" transform="translate(1107 261)">
-      <rect width="92" height="126" rx="11" fill="#faf9fe" stroke="#c5bfe5"/>
-      <text class="label" x="46" y="21" text-anchor="middle">Stage 1</text>
-      <path d="M29 54 L63 54 L46 84 Z M29 54 L46 84 M63 54 L46 84" fill="none" stroke="#8a7ed1" stroke-width="1.5"/>
-      <circle cx="29" cy="54" r="10" fill="#3e83b7"/><circle cx="63" cy="54" r="10" fill="#667d8c"/><circle cx="46" cy="84" r="10" fill="#d66a58"/>
-      <text class="white-label" x="29" y="58" text-anchor="middle" style="font-size:9px">R</text><text class="white-label" x="63" y="58" text-anchor="middle" style="font-size:9px">N</text><text class="white-label" x="46" y="88" text-anchor="middle" style="font-size:9px">T</text>
-      <text class="tiny" x="46" y="111" text-anchor="middle">all-connected</text>
-    </g>
-    <path class="hairline" d="M1201 324 H1215" marker-end="url(#arrow)"/>
-
-    <g id="aci-stage-2" transform="translate(1218 261)">
-      <rect width="92" height="126" rx="11" fill="#f7f5fd" stroke="#b8afe0"/>
-      <text class="label" x="46" y="21" text-anchor="middle">Stage 2</text>
-      <path d="M29 54 L63 54 L46 84 Z M29 54 L46 84 M63 54 L46 84" fill="none" stroke="#7a6bcb" stroke-width="1.5"/>
-      <circle cx="29" cy="54" r="10" fill="#3e83b7"/><circle cx="63" cy="54" r="10" fill="#667d8c"/><circle cx="46" cy="84" r="10" fill="#d66a58"/>
-      <text class="white-label" x="29" y="58" text-anchor="middle" style="font-size:9px">R</text><text class="white-label" x="63" y="58" text-anchor="middle" style="font-size:9px">N</text><text class="white-label" x="46" y="88" text-anchor="middle" style="font-size:9px">T</text>
-      <text class="tiny" x="46" y="111" text-anchor="middle">all-connected</text>
-    </g>
-    <path class="hairline" d="M1312 324 H1326" marker-end="url(#arrow)"/>
-
-    <g id="aci-stage-3" transform="translate(1329 261)">
-      <rect width="92" height="126" rx="11" fill="#f4f1fc" stroke="#a99ed9"/>
-      <text class="label" x="46" y="21" text-anchor="middle">Stage 3</text>
-      <path d="M29 54 L63 54 L46 84 Z M29 54 L46 84 M63 54 L46 84" fill="none" stroke="#6b5ac7" stroke-width="1.5"/>
-      <circle cx="29" cy="54" r="10" fill="#3e83b7"/><circle cx="63" cy="54" r="10" fill="#667d8c"/><circle cx="46" cy="84" r="10" fill="#d66a58"/>
-      <text class="white-label" x="29" y="58" text-anchor="middle" style="font-size:9px">R</text><text class="white-label" x="63" y="58" text-anchor="middle" style="font-size:9px">N</text><text class="white-label" x="46" y="88" text-anchor="middle" style="font-size:9px">T</text>
-      <text class="tiny" x="46" y="111" text-anchor="middle">all-connected</text>
-    </g>
-    <rect x="1248" y="404" width="174" height="31" rx="9" fill="#6b5ac7"/>
-    <text class="white-label" x="1335" y="425" text-anchor="middle">ACI descriptor (3d)</text>
-  </g>
-
-  <path class="flow-mask" d="M1036 385 H1065 V247 H1086"/>
-  <text x="1057" y="316" text-anchor="middle" transform="rotate(-90 1057 316)" style="font:600 11px Arial,Helvetica,sans-serif;fill:#6b5ac7">M_HS constraint</text>
-
-  <!-- PLR module -->
-  <g id="plr-module">
-    <rect class="module" x="1086" y="492" width="356" height="204" rx="18"/>
-    <rect x="1086" y="492" width="356" height="57" rx="18" fill="#fff7e9"/>
-    <path d="M1086 532 H1442 V549 H1086 Z" fill="#fff7e9"/>
-    <circle cx="1114" cy="520" r="17" fill="#e29a28"/>
-    <text class="white-label" x="1114" y="525" text-anchor="middle">PLR</text>
-    <text class="module-title" x="1141" y="520">Part-aware Local Representation</text>
-    <text class="module-sub" x="1141" y="541">independent local descriptor</text>
-
-    <g transform="translate(1110 571)">
-      <rect x="0" y="0" width="83" height="89" rx="9" fill="#f7fbfa" stroke="#78b9ad"/>
-      <g fill="#bde0d9" stroke="#ffffff" stroke-width="1">
-        <rect x="10" y="12" width="17" height="17"/><rect x="29" y="12" width="17" height="17"/><rect x="48" y="12" width="17" height="17"/>
-        <rect x="10" y="31" width="17" height="17" fill="#3ca58f"/><rect x="29" y="31" width="17" height="17" fill="#3ca58f"/><rect x="48" y="31" width="17" height="17"/>
-        <rect x="10" y="50" width="17" height="17"/><rect x="29" y="50" width="17" height="17" fill="#3ca58f"/><rect x="48" y="50" width="17" height="17" fill="#3ca58f"/>
-      </g>
-      <text class="tiny" x="41" y="82" text-anchor="middle">HS-selected</text>
-    </g>
-    <path class="hairline" d="M1195 615 H1216" marker-end="url(#arrow)"/>
-    <g transform="translate(1219 567)">
-      <rect x="0" y="0" width="91" height="96" rx="9" fill="#fffaf1" stroke="#dfbd82"/>
-      <rect x="13" y="12" width="29" height="68" rx="5" fill="#f3d7a7"/>
-      <path d="M13 34 H42 M13 57 H42" stroke="#c58e35" stroke-width="2"/>
-      <rect x="51" y="12" width="27" height="19" rx="4" fill="#e29a28"/>
-      <rect x="51" y="36" width="27" height="19" rx="4" fill="#e8af55"/>
-      <rect x="51" y="61" width="27" height="19" rx="4" fill="#efc779"/>
-      <text class="tiny" x="45" y="93" text-anchor="middle">3 stripe pools</text>
-    </g>
-    <path class="hairline" d="M1312 615 H1333" marker-end="url(#arrow)"/>
-    <rect x="1336" y="582" width="86" height="65" rx="10" fill="#e29a28"/>
-    <text class="white-label" x="1379" y="607" text-anchor="middle">concat</text>
-    <text x="1379" y="625" text-anchor="middle" style="font:600 11px Arial,Helvetica,sans-serif;fill:white">x 3 modes</text>
-    <text x="1379" y="640" text-anchor="middle" style="font:600 11px Arial,Helvetica,sans-serif;fill:white">PLR (9d)</text>
-  </g>
-
-  <path class="flow-selected" d="M957 404 V469 H1067 V588 H1086"/>
-  <rect x="935" y="453" width="171" height="28" rx="14" fill="#ffffff" stroke="#76b9ad"/>
-  <text class="tiny" x="1020" y="472" text-anchor="middle">selected patch features</text>
-
-  <!-- DHF module -->
-  <g id="dhf-module">
-    <rect class="module" x="714" y="742" width="728" height="270" rx="18"/>
-    <rect x="714" y="742" width="728" height="60" rx="18" fill="#eef4fa"/>
-    <path d="M714 784 H1442 V802 H714 Z" fill="#eef4fa"/>
-    <circle cx="743" cy="771" r="17" fill="#356f9d"/>
-    <text class="white-label" x="743" y="776" text-anchor="middle">DHF</text>
-    <text class="module-title" x="771" y="771">Dynamic Heterogeneous Fusion</text>
-    <text class="module-sub" x="771" y="793">seven parallel routes from complete backbone tokens</text>
-
-    <text class="tiny" x="739" y="826">3 SINGLE-MODAL</text>
-    <g transform="translate(738 839)">
-      <rect width="82" height="42" rx="9" fill="#dceaf5" stroke="#8bb2d0"/><text class="label" x="41" y="26" text-anchor="middle">RGB</text>
-    </g>
-    <g transform="translate(827 839)">
-      <rect width="82" height="42" rx="9" fill="#e8ecef" stroke="#a8b5be"/><text class="label" x="41" y="26" text-anchor="middle">NIR</text>
-    </g>
-    <g transform="translate(916 839)">
-      <rect width="82" height="42" rx="9" fill="#f9e5df" stroke="#dca99d"/><text class="label" x="41" y="26" text-anchor="middle">TIR</text>
-    </g>
-
-    <text class="tiny" x="1021" y="826">3 BI-MODAL</text>
-    <g transform="translate(1020 839)">
-      <rect width="94" height="42" rx="9" fill="#eff4f6" stroke="#9bb5c5"/><rect width="47" height="42" rx="9" fill="#dceaf5" opacity=".8"/><text class="tiny" x="47" y="26" text-anchor="middle">RGB+NIR</text>
-    </g>
-    <g transform="translate(1121 839)">
-      <rect width="94" height="42" rx="9" fill="#f6eae6" stroke="#cda99e"/><rect width="47" height="42" rx="9" fill="#dceaf5" opacity=".8"/><text class="tiny" x="47" y="26" text-anchor="middle">RGB+TIR</text>
-    </g>
-    <g transform="translate(1222 839)">
-      <rect width="94" height="42" rx="9" fill="#f3e9e8" stroke="#c4aaa6"/><rect width="47" height="42" rx="9" fill="#e8ecef" opacity=".85"/><text class="tiny" x="47" y="26" text-anchor="middle">NIR+TIR</text>
-    </g>
-    <text class="tiny" x="1330" y="826">1 ALL-MODAL</text>
-    <g transform="translate(1324 839)">
-      <rect width="94" height="42" rx="9" fill="#e7e2fa" stroke="#a79bd9"/><text class="label" x="47" y="26" text-anchor="middle">RGB+NIR+TIR</text>
-    </g>
-
-    <path d="M779 883 V899 M868 883 V899 M957 883 V899 M1067 883 V899 M1168 883 V899 M1269 883 V899 M1371 883 V899" stroke="#9cb0be" stroke-width="1.25"/>
-    <path d="M779 899 H1371" stroke="#9cb0be" stroke-width="1.25"/>
-    <path class="hairline" d="M1075 899 V913" marker-end="url(#arrow)"/>
-    <rect x="777" y="916" width="318" height="61" rx="11" fill="#f7f9fb" stroke="#b8c7d2"/>
-    <text class="label" x="936" y="940" text-anchor="middle">route-token attention + residual experts</text>
-    <text class="small" x="936" y="960" text-anchor="middle">one expert per heterogeneous route</text>
-    <path class="hairline" d="M1097 947 H1118" marker-end="url(#arrow)"/>
-    <rect x="1121" y="916" width="182" height="61" rx="11" fill="#e6eef6" stroke="#91adc2"/>
-    <text class="label" x="1212" y="940" text-anchor="middle">sample-adaptive gate</text>
-    <text class="small" x="1212" y="960" text-anchor="middle">4 heads over 7 routes</text>
-    <path class="hairline" d="M1305 947 H1325" marker-end="url(#arrow)"/>
-    <rect x="1328" y="916" width="94" height="61" rx="11" fill="#356f9d"/>
-    <text class="white-label" x="1375" y="942" text-anchor="middle">DHF</text>
-    <text x="1375" y="960" text-anchor="middle" style="font:600 11px Arial,Helvetica,sans-serif;fill:white">descriptor 7d</text>
-  </g>
-
-  <!-- Original CLS direct path -->
-  <path class="flow" d="M656 330 H676 V714 H1472 V642 H1492"/>
-  <rect x="826" y="700" width="176" height="28" rx="14" fill="#ffffff" stroke="#9fb1bf"/>
-  <text class="tiny" x="914" y="719" text-anchor="middle">original RGB / NIR / TIR CLS</text>
-
-  <!-- Final descriptor fusion -->
-  <g id="descriptor-fusion">
-    <rect x="1492" y="482" width="274" height="374" rx="20" fill="url(#fusionGradient)" stroke="#b7ade0" stroke-width="1.7" filter="url(#shadow)"/>
-    <text class="module-title" x="1629" y="518" text-anchor="middle">Final Descriptor</text>
-    <text class="module-sub" x="1629" y="540" text-anchor="middle">per-branch L2 normalization</text>
-
-    <rect x="1517" y="559" width="224" height="48" rx="10" fill="#e9e4fa" stroke="#a89ddd"/>
-    <circle cx="1541" cy="583" r="13" fill="#6b5ac7"/><text class="white-label" x="1541" y="588" text-anchor="middle" style="font-size:10px">ACI</text>
-    <text class="label" x="1563" y="588">ACI descriptor</text><text class="label" x="1721" y="588" text-anchor="end">1.0</text>
-
-    <rect x="1517" y="618" width="224" height="48" rx="10" fill="#f5f8fa" stroke="#b8c7d2"/>
-    <circle cx="1541" cy="642" r="13" fill="#536f84"/><text class="white-label" x="1541" y="646" text-anchor="middle" style="font-size:9px">CLS</text>
-    <text class="label" x="1563" y="647">Original CLS</text><text class="label" x="1721" y="647" text-anchor="end">1.1</text>
-
-    <rect x="1517" y="677" width="224" height="48" rx="10" fill="#fbf5e9" stroke="#d8c69f"/>
-    <circle cx="1541" cy="701" r="13" fill="#b7a26e"/><text class="white-label" x="1541" y="706" text-anchor="middle" style="font-size:9px">PLR</text>
-    <text x="1563" y="706" style="font:600 14px Arial,Helvetica,sans-serif;fill:#8b8270">PLR descriptor</text><text x="1721" y="706" text-anchor="end" style="font:700 14px Arial,Helvetica,sans-serif;fill:#8b8270">0</text>
-
-    <rect x="1517" y="736" width="224" height="48" rx="10" fill="#e7eff6" stroke="#98b1c5"/>
-    <circle cx="1541" cy="760" r="13" fill="#356f9d"/><text class="white-label" x="1541" y="765" text-anchor="middle" style="font-size:9px">DHF</text>
-    <text class="label" x="1563" y="765">DHF descriptor</text><text class="label" x="1721" y="765" text-anchor="end">1.58</text>
-
-    <path class="hairline" d="M1550 803 H1708"/>
-    <text class="label" x="1629" y="827" text-anchor="middle">weighted concatenation</text>
-    <text class="small" x="1629" y="846" text-anchor="middle">then final L2 normalization</text>
-  </g>
-
-  <!-- Descriptor arrows -->
-  <path class="flow-mask" d="M1442 419 H1472 V583 H1492"/>
-  <path class="flow-soft" d="M1442 615 H1469 V701 H1492"/>
-  <path class="flow" d="M1442 947 H1472 V760 H1492"/>
-  <path class="flow" d="M1766 668 H1788"/>
-  <circle cx="1792" cy="668" r="6" fill="#17324d"/>
-
-  <!-- E045 note and legend -->
-  <rect x="1492" y="876" width="274" height="63" rx="12" fill="#fffaf0" stroke="#dec58e"/>
-  <text class="label" x="1629" y="900" text-anchor="middle">Frozen E045 inference</text>
-  <text class="small" x="1629" y="920" text-anchor="middle">PLR weight = 0 (branch retained)</text>
-
-  <g id="legend">
-    <line x1="48" y1="1040" x2="88" y2="1040" stroke="#29465f" stroke-width="2.2" marker-end="url(#arrow)"/>
-    <text class="small" x="99" y="1044">complete backbone-token flow</text>
-    <line x1="322" y1="1040" x2="362" y2="1040" stroke="#168b7b" stroke-width="2.2" marker-end="url(#arrowTeal)"/>
-    <text class="small" x="373" y="1044">HS-selected patch flow</text>
-    <line x1="576" y1="1040" x2="616" y2="1040" stroke="#6b5ac7" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#arrowPurple)"/>
-    <text class="small" x="627" y="1044">HS mask constraint</text>
-    <text class="small" x="905" y="1044">d = ViT token dimension</text>
-    <text class="small" x="1765" y="1044" text-anchor="end">All module labels are paper-facing names.</text>
-  </g>
+<!-- final weighted concatenation -->
+<g><rect x="1530" y="402" width="346" height="594" rx="4" class="grp"/><text x="1703" y="432" text-anchor="middle" class="mt">Final Descriptor</text><text x="1703" y="452" text-anchor="middle" class="sm">branch norm. → weight → concatenate → L2 norm.</text>
+ <path d="M1494 221H1555V500" class="f"/><rect x="1560" y="484" width="198" height="50" class="neu"/><text x="1576" y="506" class="lb">ACI</text><text x="1576" y="524" class="sm">3d descriptor</text><text x="1738" y="514" text-anchor="end" class="lb">× 1.00</text>
+ <path d="M1512 384V577H1560" class="f"/><rect x="1560" y="552" width="198" height="50" class="neu"/><text x="1576" y="574" class="lb">Original CLS</text><text x="1576" y="592" class="sm">3d descriptor</text><text x="1738" y="582" text-anchor="end" class="lb">× 1.10</text>
+ <path d="M816 690V1008H1518V645H1560" class="f"/><rect x="1560" y="620" width="198" height="50" fill="#fafafa" stroke="#aaa"/><text x="1576" y="642" class="lb mut">PLR</text><text x="1576" y="660" class="sm mut">9d descriptor</text><text x="1738" y="650" text-anchor="end" class="lb mut">× 0</text>
+ <path d="M1493 950H1522V716H1560" class="f"/><rect x="1560" y="688" width="198" height="50" class="neu"/><text x="1576" y="710" class="lb">DHF</text><text x="1576" y="728" class="sm">7d descriptor</text><text x="1738" y="718" text-anchor="end" class="lb">× 1.58</text>
+ <path d="M1758 509H1801V757M1758 577H1801M1758 645H1801M1758 713H1801" class="th"/><circle cx="1801" cy="782" r="25" class="w"/><text x="1801" y="788" text-anchor="middle" class="lb">C</text><path d="M1801 807V852" class="f"/><rect x="1628" y="854" width="216" height="62" class="w"/><text x="1736" y="881" text-anchor="middle" class="lb">Weighted Descriptor</text><text x="1736" y="901" text-anchor="middle" class="sm">for retrieval</text><text x="1703" y="956" text-anchor="middle" class="sm mut">Frozen E045 inference: w<tspan baseline-shift="sub">PLR</tspan> = 0</text>
+</g>
+<text x="949" y="1035" text-anchor="middle" class="sm mut">Complete tokens feed ACI and DHF; HS-selected patch features feed PLR.</text>
 </svg>
