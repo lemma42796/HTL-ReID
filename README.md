@@ -20,21 +20,25 @@ The shared protocol is `configs/RGBNT201/paper/base.yml`; merge exactly one of
 `m0.yml` through `m3.yml` from the same directory. The older A0-A5 chain20
 overlays are archived diagnostic configurations, not formal paper configs.
 
-The old AGF-wrapped TPM path remains archived negative evidence. A separate,
-clean TOP-ReID TPM reproduction and the FACSS-guided FACR extension live under
-`configs/RGBNT201/fusion`; neither changes the completed M0-M3 results.
-Modality adapters, part branches, and auxiliary loss/full branches are not the
-current paper-method path. HSL is not part of this model path.
+The old AGF-wrapped TPM path remains archived negative evidence; the legacy
+TPM, AGF, and HS_FACSS modules have been removed from the codebase (old
+checkpoints keep loading through key migration). The ACI (Adaptive
+Cross-modal Interaction) fusion extension and its historical fusion overlays
+live under `configs/RGBNT201/fusion`; they do not change the completed M0-M3
+results. Modality adapters, part branches, and auxiliary loss/full branches
+are not the current paper-method path. HSL is not part of this model path.
 
 ## Cross-modal fusion extension
 
 Merge the frozen paper base with exactly one fusion overlay:
 
-- `t1_tpm.yml`: attributed TPM reproduction on complete backbone tokens.
-- `t2_adaptive_routing.yml`: adaptive all-connected routing without FACSS.
-- `t3_m2_facr.yml`: dense FACSS scores softly guide adaptive routing.
+- `t1_tpm.yml`: archived TOP-ReID TPM reproduction row (module removed;
+  reproducing it requires a historical commit).
+- `t2_adaptive_routing.yml`: adaptive all-connected interaction without
+  selector guidance.
+- `t3_m2_facr.yml`: dense selector scores softly guide adaptive interaction.
 
-TPM/FACR directly produce the supervised 3D descriptor. They do not use the
+ACI directly produces the supervised 3D descriptor. It does not use the
 legacy AGF wrapper, hard-pruned fusion input, or a `0.15` auxiliary concat.
 
 ## Requirements
@@ -76,9 +80,9 @@ The paper configs explicitly disable re-ranking for the main results.
 ## Legacy-style A2 comparison
 
 The current implementation can also reproduce the old A2 module combination:
-HS + FACSS + quality weighting + quality-aware frequency selection. This is a
-comparison with the old code path, not a fifth paper ablation row. Merge the
-legacy overlay after the frozen paper base:
+HS token selection + quality weighting + quality-aware frequency selection.
+This is a comparison with the old code path, not a fifth paper ablation row.
+Merge the legacy overlay after the frozen paper base:
 
 ```bash
 timeout --signal=TERM --kill-after=10s 30m \
@@ -123,7 +127,7 @@ python test_pipeline.py
 ```
 
 The smoke test checks config merging, scheduler semantics, 3-modal and 2-modal
-forward/backward passes, save/load, explicit HS/FACSS switches, all four paper
+forward/backward passes, save/load, the HS selector modes, all four paper
 rows, and the legacy-style quality-aware frequency path without real datasets.
 
 ## License
