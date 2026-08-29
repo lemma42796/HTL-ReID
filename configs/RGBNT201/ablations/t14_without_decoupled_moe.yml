@@ -1,6 +1,5 @@
-# E048: clean T14 ablation without the seven-route decoupled MoE.
-# This mirrors E043's initialization, losses, schedule, and non-MoE
-# descriptors; the only effective structural change is disabling the MoE.
+# Historical E048: T14 ablation without the seven-route decoupled MoE.
+# Like E043, it warm-starts from E042; neither run is ImageNet-independent.
 MODEL:
   RESUME_PATH: '/root/autodl-tmp/outputs/HTL-ReID/E042_T12_peak_warmstart_seed1111/HTL-ReID_best.pth'
   HS_ENABLED: 1

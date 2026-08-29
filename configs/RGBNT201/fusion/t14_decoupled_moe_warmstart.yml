@@ -1,4 +1,5 @@
-# T14: preserve the E042 ACI path and add a DeMo-inspired seven-route MoE.
+# Historical E043/T14: warm-start E042 and add a DeMo-inspired seven-route MoE.
+# Retained only for reproduction; this is not an ImageNet-independent run.
 MODEL:
   RESUME_PATH: '/root/autodl-tmp/outputs/HTL-ReID/E042_T12_peak_warmstart_seed1111/HTL-ReID_best.pth'
   HS_ENABLED: 1
