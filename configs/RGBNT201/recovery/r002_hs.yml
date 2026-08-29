@@ -1,0 +1,7 @@
+# R002: R001 + hierarchical candidate selection.
+MODEL:
+  HS_ENABLED: 1
+  FACSS_ENABLED: 0
+  AGF: 0
+
+OUTPUT_DIR: '/root/autodl-tmp/outputs/HTL-ReID-old/recovery/R002'

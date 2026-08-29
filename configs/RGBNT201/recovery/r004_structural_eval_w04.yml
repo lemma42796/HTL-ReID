@@ -1,0 +1,5 @@
+# Evaluation-only overlay for the best structural-rescue descriptor balance.
+MODEL:
+  AGF_RESIDUAL_WEIGHT: 0.4
+
+OUTPUT_DIR: '/root/autodl-tmp/outputs/HTL-ReID-old/recovery/R004_structural_eval_w04'

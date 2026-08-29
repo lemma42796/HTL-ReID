@@ -1,0 +1,29 @@
+# Structural rescue: HS candidates -> differentiable FACSS slots -> active AGF.
+MODEL:
+  HS_ENABLED: 1
+  FACSS_ENABLED: 1
+  FACSS_CROSS_POOL: 'dual_softmax'
+  FACSS_MATCH_TEMP: 0.07
+  FACSS_OUTPUT_MODE: 'soft_slots'
+  FACSS_SLOT_TEMP: 0.20
+  FACSS_SLOT_SCORE_SCALE: 2.0
+  FACSS_STE: 0
+  FACSS_TRAIN_SOFT: 0
+
+  SELECTED_PATCH_BLEND_WEIGHT: 0.50
+  SELECTED_PATCH_CONTEXT: 'attn_gate'
+  SELECTED_PATCH_GATE_INIT: 0.0
+
+  AGF: 1
+  AGF_MODE: 'residual_cascade'
+  AGF_USE_MASKS: 1
+  AGF_RESIDUAL_IDENTITY_INIT: 0
+  AGF_FUSION_MODE: 'residual'
+  AGF_RESIDUAL_WEIGHT: 1.0
+  AGF_LEARNABLE_RESIDUAL: 0
+
+  LOCAL_SUPERVISION: 1
+  FUSE_LOSS_WEIGHT: 1.0
+  BRANCH_LOSS_WEIGHT: 0.25
+
+OUTPUT_DIR: '/root/autodl-tmp/outputs/HTL-ReID-old/recovery/R004_structural'

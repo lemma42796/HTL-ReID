@@ -68,6 +68,10 @@ class HSFACSS(nn.Module):
     def __init__(self, dim, cfg):
         super().__init__()
         self.dim = dim
+        self.use_hs = bool(cfg.MODEL.HS_ENABLED)
+        self.use_facss = bool(cfg.MODEL.FACSS_ENABLED)
+        if self.use_facss and not self.use_hs:
+            raise ValueError("MODEL.FACSS_ENABLED requires MODEL.HS_ENABLED")
         self.hs = HierarchicalRollout(
             layers=tuple(cfg.MODEL.HS_LAYERS),
             k=cfg.MODEL.HS_K,
@@ -80,32 +84,48 @@ class HSFACSS(nn.Module):
         self.cross_pool = cfg.MODEL.FACSS_CROSS_POOL
         self.cross_topk = cfg.MODEL.FACSS_CROSS_TOPK
         self.cross_lse_tau = cfg.MODEL.FACSS_CROSS_LSE_TAU
+        self.match_temp = float(cfg.MODEL.FACSS_MATCH_TEMP)
+        self.output_mode = cfg.MODEL.FACSS_OUTPUT_MODE.lower()
+        if self.output_mode not in ('masked', 'soft_slots'):
+            raise ValueError("MODEL.FACSS_OUTPUT_MODE must be 'masked' or 'soft_slots'")
+        self.slot_temp = float(cfg.MODEL.FACSS_SLOT_TEMP)
+        self.slot_score_scale = float(cfg.MODEL.FACSS_SLOT_SCORE_SCALE)
         self.alpha_grain = cfg.MODEL.FACSS_ALPHA_GRANULARITY
         self.norm_mode = cfg.MODEL.FACSS_NORM
         self.use_ste = bool(cfg.MODEL.FACSS_STE)
         self.ste_tau = float(cfg.MODEL.FACSS_STE_TAU)
+        self.train_soft = bool(cfg.MODEL.FACSS_TRAIN_SOFT)
         self.modality_union = bool(cfg.MODEL.FACSS_MODALITY_UNION)
         self.union_promote = bool(cfg.MODEL.FACSS_UNION_PROMOTE)
 
-        hidden = cfg.MODEL.FACSS_ALPHA_HIDDEN
-        in_dim = 3 * dim if self.alpha_grain == 'sample' else 4 * dim
-        self.alpha_mlp = nn.Sequential(
-            nn.LayerNorm(in_dim),
-            nn.Linear(in_dim, hidden),
-            nn.GELU(),
-            nn.Linear(hidden, 1),
-        )
-        nn.init.zeros_(self.alpha_mlp[-1].bias)         # initial alpha ~= 0.5
+        if self.use_facss:
+            hidden = cfg.MODEL.FACSS_ALPHA_HIDDEN
+            in_dim = 3 * dim if self.alpha_grain == 'sample' else 4 * dim
+            self.alpha_mlp = nn.Sequential(
+                nn.LayerNorm(in_dim),
+                nn.Linear(in_dim, hidden),
+                nn.GELU(),
+                nn.Linear(hidden, 1),
+            )
+            nn.init.zeros_(self.alpha_mlp[-1].bias)     # initial alpha ~= 0.5
+            self.match_q = nn.Linear(dim, dim, bias=False)
+            self.match_k = nn.Linear(dim, dim, bias=False)
+            nn.init.eye_(self.match_q.weight)
+            nn.init.eye_(self.match_k.weight)
+            if self.output_mode == 'soft_slots':
+                self.selector_queries = nn.Parameter(torch.empty(self.facss_k, dim))
+                nn.init.normal_(self.selector_queries, std=0.02)
 
-        k_hidden = cfg.MODEL.FACSS_K_HIDDEN
-        self.k_mlp = nn.Sequential(
-            nn.LayerNorm(4 * dim + 1),
-            nn.Linear(4 * dim + 1, k_hidden),
-            nn.GELU(),
-            nn.Linear(k_hidden, 1),
-        )
-        nn.init.zeros_(self.k_mlp[-1].weight)
-        nn.init.zeros_(self.k_mlp[-1].bias)
+            if self.dynamic_k:
+                k_hidden = cfg.MODEL.FACSS_K_HIDDEN
+                self.k_mlp = nn.Sequential(
+                    nn.LayerNorm(4 * dim + 1),
+                    nn.Linear(4 * dim + 1, k_hidden),
+                    nn.GELU(),
+                    nn.Linear(k_hidden, 1),
+                )
+                nn.init.zeros_(self.k_mlp[-1].weight)
+                nn.init.zeros_(self.k_mlp[-1].bias)
 
     @staticmethod
     def _normalize(s, mode, mask=None, eps=1e-6):
@@ -168,20 +188,31 @@ class HSFACSS(nn.Module):
         others_quality: optional list of [B] or [B, 1] quality scores.
         Returns S_cross: [B, N].
         """
-        p_norm = F.normalize(p_feats, dim=-1)
+        if self.cross_pool == 'dual_softmax':
+            p_norm = F.normalize(self.match_q(p_feats), dim=-1)
+        else:
+            p_norm = F.normalize(p_feats, dim=-1)
         scores = []
         for q in others_feats:
-            q_norm = F.normalize(q, dim=-1)
+            if self.cross_pool == 'dual_softmax':
+                q_norm = F.normalize(self.match_k(q), dim=-1)
+            else:
+                q_norm = F.normalize(q, dim=-1)
             cos = torch.matmul(p_norm, q_norm.transpose(-1, -2))   # [B, N, N]
-            cos = F.relu(cos)
             if self.cross_pool == 'max':
-                pooled = cos.max(dim=-1).values
+                pooled = F.relu(cos).max(dim=-1).values
             elif self.cross_pool == 'topk':
                 k = min(self.cross_topk, cos.size(-1))
-                pooled = cos.topk(k, dim=-1).values.mean(dim=-1)
+                pooled = F.relu(cos).topk(k, dim=-1).values.mean(dim=-1)
             elif self.cross_pool == 'lse':
                 tau = self.cross_lse_tau
-                pooled = (1.0 / tau) * torch.logsumexp(tau * cos, dim=-1)
+                pooled = (1.0 / tau) * torch.logsumexp(tau * F.relu(cos), dim=-1)
+            elif self.cross_pool == 'dual_softmax':
+                logits = cos / self.match_temp
+                mutual = torch.softmax(logits, dim=-1) * torch.softmax(logits, dim=-2)
+                mass = mutual.sum(dim=-1).clamp_min(1e-8)
+                expected = (mutual * F.relu(cos)).sum(dim=-1) / mass
+                pooled = expected * mass.sqrt()
             else:
                 raise ValueError(self.cross_pool)
             scores.append(pooled)
@@ -251,10 +282,22 @@ class HSFACSS(nn.Module):
         patches = m_feat[:, 1:, :]                                 # [B, N, D]
         B, N, D = patches.shape
 
+        if not self.use_hs:
+            full_mask = torch.ones(B, N, dtype=torch.bool, device=patches.device)
+            return m_feat, full_mask
+
         hs_mask, s_self_full, _ = self.hs(m_attn)                  # both per modality
         cand_mask = hs_mask
         if mask_fre is not None:
             cand_mask = cand_mask | mask_fre.bool()
+
+        if not self.use_facss:
+            gate = cand_mask.to(dtype=patches.dtype)
+            feat_out = torch.cat(
+                [cls_token, patches * gate.unsqueeze(-1)],
+                dim=1,
+            )
+            return feat_out, cand_mask
 
         s_cross_full = self._cross_score(
             patches, others_full, others_quality=others_quality)   # [B, N]
@@ -273,17 +316,46 @@ class HSFACSS(nn.Module):
         very_neg = torch.finfo(s_facss.dtype).min
         s_facss = torch.where(cand_mask, s_facss, torch.full_like(s_facss, very_neg))
 
+        if self.output_mode == 'soft_slots':
+            # Fixed K differentiable local slots. Each query extracts a
+            # different candidate-token mixture while the FACSS score acts as
+            # a shared cross-modal relevance prior. Train and test use exactly
+            # the same representation, avoiding soft/hard selection mismatch.
+            slot_q = F.normalize(self.selector_queries, dim=-1)
+            slot_k = F.normalize(self.match_q(patches), dim=-1)
+            slot_logits = torch.einsum('kd,bnd->bkn', slot_q, slot_k)
+            slot_logits = slot_logits / max(self.slot_temp, 1e-6)
+            score_prior = torch.where(cand_mask, s_facss, torch.zeros_like(s_facss))
+            slot_logits = slot_logits + self.slot_score_scale * score_prior.unsqueeze(1)
+            slot_logits = slot_logits.masked_fill(
+                ~cand_mask.unsqueeze(1), torch.finfo(slot_logits.dtype).min)
+            slot_weights = F.softmax(slot_logits, dim=-1)
+            local_tokens = torch.matmul(slot_weights, patches)
+            slot_mask = torch.ones(
+                B, self.facss_k, dtype=torch.bool, device=patches.device)
+            return torch.cat([cls_token, local_tokens], dim=1), slot_mask
+
         sel_mask = torch.zeros(B, N, dtype=torch.bool, device=patches.device)
         k_each, k_ratio = self._predict_k(cls_token.squeeze(1), cls_list, modality_quality, N)
-        for b in range(B):
-            k_b = int(k_each[b].item())
-            topk_idx = s_facss[b].topk(k_b, dim=0).indices
-            sel_mask[b].scatter_(0, topk_idx, True)
+        max_k = min(self.facss_max_k if self.dynamic_k else self.facss_k, N)
+        topk_idx = s_facss.topk(max_k, dim=1).indices
+        if self.dynamic_k:
+            ranks = torch.arange(max_k, device=patches.device).unsqueeze(0)
+            selected = ranks < k_each.unsqueeze(1)
+            sel_mask.scatter_(1, topk_idx, selected)
+        else:
+            sel_mask.scatter_(1, topk_idx, True)
 
-        # Build the gating tensor applied to patches.
-        # STE: forward = hard sel_mask; backward = softmax over candidate scores
-        # (so alpha_mlp and the rollout-derived scores receive gradient).
+        # During training, optionally expose every HS candidate to downstream
+        # pooling/attention with a differentiable approximation of hard top-K.
+        # Evaluation always uses the exact hard mask.
         sel_mask_f = sel_mask.float()
+        if self.train_soft and self.training:
+            kth_score = s_facss.gather(1, topk_idx[:, -1:]).detach()
+            soft = torch.sigmoid((s_facss - kth_score) / self.ste_tau)
+            soft = soft * cand_mask.to(dtype=soft.dtype)
+            feat_out = torch.cat([cls_token, patches], dim=1)
+            return feat_out, soft
         if self.use_ste and self.training:
             soft = F.softmax(s_facss / self.ste_tau, dim=1)        # [B, N]
             gate = sel_mask_f + soft - soft.detach()
@@ -344,7 +416,7 @@ class HSFACSS(nn.Module):
             outs[name] = feat_out
             masks[name] = sel_mask
 
-        if self.modality_union and len(masks) > 1:
+        if self.use_facss and self.modality_union and len(masks) > 1:
             shared_mask = None
             for sel_mask in masks.values():
                 shared_mask = sel_mask if shared_mask is None else (shared_mask | sel_mask)

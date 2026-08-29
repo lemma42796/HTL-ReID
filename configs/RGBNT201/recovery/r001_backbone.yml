@@ -1,0 +1,7 @@
+# R001: common readout over all backbone patches; no HS/FACSS/AGF.
+MODEL:
+  HS_ENABLED: 0
+  FACSS_ENABLED: 0
+  AGF: 0
+
+OUTPUT_DIR: '/root/autodl-tmp/outputs/HTL-ReID-old/recovery/R001'

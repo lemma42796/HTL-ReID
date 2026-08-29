@@ -1,0 +1,7 @@
+# R004: R003 + equation-faithful cascaded AGF.
+MODEL:
+  HS_ENABLED: 1
+  FACSS_ENABLED: 1
+  AGF: 1
+
+OUTPUT_DIR: '/root/autodl-tmp/outputs/HTL-ReID-old/recovery/R004'

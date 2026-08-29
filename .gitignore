@@ -1,7 +1,8 @@
 # Local/private handoff and evidence docs
-HANDOFF.md
-notes/实验排障与证据备查.md
-notes/实验配置备查表.md
+*.md
+!README.md
+!README.MD
+!readme.md
 
 # Local experiment logs and OS metadata
 local_logs/

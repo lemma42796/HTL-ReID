@@ -1,0 +1,17 @@
+# FACSS-v2: learned bidirectional token matching with soft training selection.
+MODEL:
+  HS_ENABLED: 1
+  FACSS_ENABLED: 1
+  FACSS_CROSS_POOL: 'dual_softmax'
+  FACSS_MATCH_TEMP: 0.07
+  FACSS_STE: 0
+  FACSS_TRAIN_SOFT: 1
+  FACSS_STE_TAU: 0.15
+  AGF: 1
+  AGF_MODE: 'residual_cascade'
+  AGF_USE_MASKS: 1
+  AGF_FUSION_MODE: 'residual'
+  AGF_RESIDUAL_WEIGHT: 1.0
+  AGF_LEARNABLE_RESIDUAL: 0
+
+OUTPUT_DIR: '/root/autodl-tmp/outputs/HTL-ReID-old/recovery/R003_facss_v2'

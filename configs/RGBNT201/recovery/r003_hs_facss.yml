@@ -1,0 +1,7 @@
+# R003: R002 + fixed-K paper FACSS.
+MODEL:
+  HS_ENABLED: 1
+  FACSS_ENABLED: 1
+  AGF: 0
+
+OUTPUT_DIR: '/root/autodl-tmp/outputs/HTL-ReID-old/recovery/R003'

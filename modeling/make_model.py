@@ -253,14 +253,17 @@ class HTLReID(nn.Module):
         self.feat_w = int(cfg.INPUT.SIZE_TRAIN[1] // cfg.MODEL.STRIDE_SIZE[1])
         self.num_patches = self.feat_h * self.feat_w
         self.HS_FACSS = HSFACSS(dim=self.BACKBONE.token_dim, cfg=cfg)
+        self.use_frequency = bool(cfg.MODEL.FREQUENCY_ENABLED)
         self.FREQ_INDEX = Frequency_based_Token_Selection(keep=cfg.MODEL.FREQUENCY_KEEP,
                                                           stride=cfg.MODEL.STRIDE_SIZE[0],
                                                           quality_aware=cfg.MODEL.FREQUENCY_QUALITY_AWARE)
-        self.use_agf = cfg.MODEL.AGF
+        self.use_agf = bool(cfg.MODEL.AGF)
+        self.agf_mode = cfg.MODEL.AGF_MODE.lower()
         self.use_ocfr = bool(cfg.MODEL.OCFR)
         self.use_quality = bool(cfg.MODEL.QUALITY_AWARE)
         self.use_adapter = bool(cfg.MODEL.MODALITY_ADAPTER)
         self.use_part = bool(cfg.MODEL.PART_BRANCH)
+        self.use_local_supervision = bool(cfg.MODEL.LOCAL_SUPERVISION)
         self.part_num = int(cfg.MODEL.PART_NUM)
         self.part_pool = cfg.MODEL.PART_POOL.lower()
         if self.part_pool not in ('stripe', 'semantic'):
@@ -283,11 +286,19 @@ class HTLReID(nn.Module):
             raise ValueError("MODEL.SELECTED_PATCH_CONTEXT must be 'mean' or 'attn_gate'")
         self.selected_patch_attn_scale = float(cfg.MODEL.SELECTED_PATCH_ATTN_SCALE)
         self.use_selected_aggregation = bool(cfg.MODEL.SELECTED_AGGREGATION)
+        self.branch_feature_source = cfg.MODEL.BRANCH_FEATURE_SOURCE.lower()
+        if self.branch_feature_source not in ('backbone', 'final'):
+            raise ValueError("MODEL.BRANCH_FEATURE_SOURCE must be 'backbone' or 'final'")
+        self.modality_specific_heads = bool(cfg.MODEL.MODALITY_SPECIFIC_HEADS)
         self.agf_residual_weight = float(cfg.MODEL.AGF_RESIDUAL_WEIGHT)
         self.agf_learnable_residual = bool(cfg.MODEL.AGF_LEARNABLE_RESIDUAL)
         self.agf_fusion_mode = cfg.MODEL.AGF_FUSION_MODE.lower()
         if self.agf_fusion_mode not in ('residual', 'agreement', 'concat'):
             raise ValueError("MODEL.AGF_FUSION_MODE must be 'residual', 'agreement', or 'concat'")
+        if (self.branch_feature_source == 'final' and self.use_agf and
+                self.agf_mode != 'paper_cascade' and self.agf_fusion_mode == 'concat'):
+            raise ValueError(
+                "final branch supervision is undefined for outer AGF concat mode")
         self.agf_concat_weight = float(cfg.MODEL.AGF_CONCAT_WEIGHT)
         self.agf_aux_supervision = bool(cfg.MODEL.AGF_AUX_SUPERVISION)
         self.agf_agree_min = float(cfg.MODEL.AGF_AGREE_MIN)
@@ -314,7 +325,9 @@ class HTLReID(nn.Module):
                            quality_scale=bool(cfg.MODEL.AGF_QUALITY_SCALE),
                            mode=cfg.MODEL.AGF_MODE,
                            tpm_steps=cfg.MODEL.AGF_TPM_STEPS,
-                           use_masks=bool(cfg.MODEL.AGF_USE_MASKS))
+                           use_masks=bool(cfg.MODEL.AGF_USE_MASKS),
+                           residual_identity_init=bool(
+                               cfg.MODEL.AGF_RESIDUAL_IDENTITY_INIT))
             if self.agf_learnable_residual:
                 max_weight = max(float(self.agf_residual_weight), 1e-4)
                 init_weight = min(max(float(cfg.MODEL.AGF_RESIDUAL_INIT), 1e-6),
@@ -355,16 +368,34 @@ class HTLReID(nn.Module):
 
         # The output learning params of fused features
         self.fuse_dim = 3 * self.BACKBONE.token_dim
-        if self.use_agf and self.agf_fusion_mode == 'concat':
+        if (self.use_agf and self.agf_mode != 'paper_cascade' and
+                self.agf_fusion_mode == 'concat'):
             self.fuse_dim *= 2
         self.FUSE_HEAD = nn.Linear(self.fuse_dim, num_classes, bias=False)
         self.FUSE_BN = nn.BatchNorm1d(self.fuse_dim)
         self.FUSE_HEAD.apply(weights_init_classifier)
+        if self.use_local_supervision:
+            local_dim = 3 * self.BACKBONE.token_dim
+            self.LOCAL_BN = nn.BatchNorm1d(local_dim)
+            self.LOCAL_HEAD = nn.Linear(local_dim, num_classes, bias=False)
+            self.LOCAL_HEAD.apply(weights_init_classifier)
 
         # The output learning params of RGB/NIR/TIR cls tokens
-        self.BACKBONE_HEAD = nn.Linear(self.BACKBONE.token_dim, num_classes, bias=False)
-        self.BACKBONE_BN = nn.BatchNorm1d(self.BACKBONE.token_dim)
-        self.BACKBONE_HEAD.apply(weights_init_classifier)
+        if self.modality_specific_heads:
+            self.MODALITY_BNS = nn.ModuleDict({
+                name: nn.BatchNorm1d(self.BACKBONE.token_dim)
+                for name in ('RGB', 'NIR', 'TIR')
+            })
+            self.MODALITY_HEADS = nn.ModuleDict({
+                name: nn.Linear(self.BACKBONE.token_dim, num_classes, bias=False)
+                for name in ('RGB', 'NIR', 'TIR')
+            })
+            self.MODALITY_HEADS.apply(weights_init_classifier)
+        else:
+            self.BACKBONE_HEAD = nn.Linear(
+                self.BACKBONE.token_dim, num_classes, bias=False)
+            self.BACKBONE_BN = nn.BatchNorm1d(self.BACKBONE.token_dim)
+            self.BACKBONE_HEAD.apply(weights_init_classifier)
         # Here, you can choose to use different head for different modalities
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # self.BACKBONE_HEAD_2 = nn.Linear(self.BACKBONE.token_dim, num_classes, bias=False)
@@ -408,6 +439,14 @@ class HTLReID(nn.Module):
 
     def _pool_selected_patches(self, feat, mask=None):
         patches = feat[:, 1:, :]
+        if mask is not None and torch.is_floating_point(mask):
+            weight = mask.to(device=patches.device, dtype=patches.dtype).clamp_min(0.0)
+            empty = weight.sum(dim=1) <= 0
+            if empty.any():
+                weight = weight.clone()
+                weight[empty] = 1.0
+            denom = weight.sum(dim=1, keepdim=True).clamp_min(1e-6)
+            return (patches * weight.unsqueeze(-1)).sum(dim=1) / denom
         valid = self._prepare_patch_mask(patches, mask)
         if valid is None:
             return patches.mean(dim=1)
@@ -423,6 +462,9 @@ class HTLReID(nn.Module):
         logits = (query * key).sum(dim=-1) * self.selected_patch_attn_scale
         if valid is not None:
             logits = logits.masked_fill(~valid, torch.finfo(logits.dtype).min)
+            if torch.is_floating_point(mask):
+                prior = mask.to(device=patches.device, dtype=logits.dtype).clamp_min(1e-6)
+                logits = logits + prior.log()
         weights = F.softmax(logits, dim=1)
         return (patches * weights.unsqueeze(-1)).sum(dim=1)
 
@@ -441,7 +483,8 @@ class HTLReID(nn.Module):
             patch_context = gate * patch_context
         return cls_token + self.selected_patch_blend_weight * patch_context
 
-    def _concat_cls(self, rgb_feat, nir_feat, tir_feat, quality_scores=None, masks=None):
+    def _modal_cls_list(self, rgb_feat, nir_feat, tir_feat,
+                        quality_scores=None, masks=None):
         masks = masks or (None, None, None)
         has_tir = len(masks) != 2 and tir_feat is not None
         if len(masks) == 2:
@@ -463,14 +506,47 @@ class HTLReID(nn.Module):
                 cls_list[i] * quality_scores[:, i:i + 1]
                 for i in range(3)
             ]
+        return cls_list
+
+    def _concat_cls(self, rgb_feat, nir_feat, tir_feat, quality_scores=None, masks=None):
+        cls_list = self._modal_cls_list(
+            rgb_feat, nir_feat, tir_feat, quality_scores, masks)
+        self._last_modal_features = tuple(cls_list)
         return torch.cat(cls_list, dim=-1)
+
+    def _local_supervision_pair(self, rgb_feat, nir_feat, tir_feat, masks=None):
+        if not self.use_local_supervision:
+            return []
+        masks = masks or (None, None, None)
+        if len(masks) == 2:
+            masks = (masks[0], masks[1], None)
+        local_feat = torch.cat([
+            self._pool_selected_patches(rgb_feat, masks[0]),
+            self._pool_selected_patches(nir_feat, masks[1]),
+            self._pool_selected_patches(tir_feat, masks[2]),
+        ], dim=-1)
+        local_score = self.LOCAL_HEAD(self.LOCAL_BN(local_feat))
+        return [local_score, local_feat]
+
+    def _score_modal_features(self, names, features):
+        if self.modality_specific_heads:
+            return [
+                self.MODALITY_HEADS[name](self.MODALITY_BNS[name](feat))
+                for name, feat in zip(names, features)
+            ]
+        return [self.BACKBONE_HEAD(self.BACKBONE_BN(feat)) for feat in features]
 
     def _agf_cls(self, rgb_feat, nir_feat, tir_feat, quality_scores=None, masks=None):
         base_cls = self._concat_cls(rgb_feat, nir_feat, tir_feat,
                                     quality_scores, masks=masks)
-        agf_cls = self.AGF(rgb_feat, nir_feat, tir_feat,
-                           quality_scores=quality_scores, masks=masks)
+        agf_cls, agf_nodes = self.AGF(
+            rgb_feat, nir_feat, tir_feat,
+            quality_scores=quality_scores, masks=masks,
+            return_modalities=True)
         self._last_agf_aux_features = (base_cls, agf_cls)
+        if self.agf_mode == 'paper_cascade':
+            self._last_modal_features = tuple(agf_nodes)
+            return agf_cls
         if self.agf_fusion_mode == 'concat':
             return torch.cat([base_cls, self.agf_concat_weight * agf_cls], dim=-1)
 
@@ -480,7 +556,9 @@ class HTLReID(nn.Module):
         else:
             weight = max_weight
         if self.agf_fusion_mode == 'residual':
-            return base_cls + weight * (agf_cls - base_cls)
+            fused = base_cls + weight * (agf_cls - base_cls)
+            self._last_modal_features = fused.chunk(3, dim=-1)
+            return fused
 
         base_nodes = base_cls.chunk(3, dim=-1)
         agf_nodes = agf_cls.chunk(3, dim=-1)
@@ -498,6 +576,7 @@ class HTLReID(nn.Module):
                 (agree - self.agf_agree_min) * self.agf_agree_temp
             ).unsqueeze(-1)
             fused_nodes.append(base_node + weight * gate * delta)
+        self._last_modal_features = tuple(fused_nodes)
         return torch.cat(fused_nodes, dim=-1)
 
     def _agf_aux_pairs(self):
@@ -539,6 +618,21 @@ class HTLReID(nn.Module):
         if tir_feat is not None:
             tir_feat = self.MODALITY_ADAPTERS['TIR'](tir_feat)
         return rgb_feat, nir_feat, tir_feat
+
+    def _frequency_mask(self, rgb, nir, tir=None, img_path=None, mode=1,
+                        writer=None, epoch=None, quality_scores=None):
+        if not self.use_frequency:
+            return None
+        return self.FREQ_INDEX(
+            x=rgb, y=nir, z=tir, img_path=img_path, mode=mode, writer=writer,
+            step=epoch, quality_scores=quality_scores,
+        )
+
+    def _run_backbone_modalities(self, inputs, cam_label=None, view_label=None):
+        return tuple(
+            self.BACKBONE(x, cam_label=cam_label, view_label=view_label)
+            for x in inputs
+        )
 
     def _stripe_part_feature(self, rgb_feat, nir_feat, tir_feat, quality_scores=None):
         def modal_parts(feat, quality=None):
@@ -723,9 +817,10 @@ class HTLReID(nn.Module):
             TIR = x['TI']
             RGB, NIR, TIR, keep_mask = self._apply_modality_dropout(
                 RGB, NIR, TIR, return_keep=True)
-            RGB_feat, RGB_attn = self.BACKBONE(RGB, cam_label=cam_label, view_label=view_label)
-            NIR_feat, NIR_attn = self.BACKBONE(NIR, cam_label=cam_label, view_label=view_label)
-            TIR_feat, TIR_attn = self.BACKBONE(TIR, cam_label=cam_label, view_label=view_label)
+            ((RGB_feat, RGB_attn),
+             (NIR_feat, NIR_attn),
+             (TIR_feat, TIR_attn)) = self._run_backbone_modalities(
+                (RGB, NIR, TIR), cam_label=cam_label, view_label=view_label)
             RGB_feat, NIR_feat, TIR_feat = self._adapt_features(RGB_feat, NIR_feat, TIR_feat)
 
             RGB_cls4tri = RGB_feat[:, 0, :]
@@ -733,15 +828,13 @@ class HTLReID(nn.Module):
             TIR_cls4tri = TIR_feat[:, 0, :]
             quality_scores = self.QUALITY_HEAD(RGB_cls4tri, NIR_cls4tri, TIR_cls4tri) \
                 if self.use_quality else None
-            mask_fre = self.FREQ_INDEX(x=RGB, y=NIR, z=TIR, img_path=img_path, mode=mode, writer=writer,
-                                       step=epoch, quality_scores=quality_scores)
+            mask_fre = self._frequency_mask(
+                RGB, NIR, TIR, img_path, mode, writer, epoch, quality_scores)
             if self.AL:
                 ori = torch.cat([RGB_cls4tri, NIR_cls4tri, TIR_cls4tri], dim=-1)
                 ori_score = self.AL_HEAD(self.AL_BN(ori))
             else:
-                RGB_cls_score = self.BACKBONE_HEAD(self.BACKBONE_BN(RGB_cls4tri))
-                NIR_cls_score = self.BACKBONE_HEAD(self.BACKBONE_BN(NIR_cls4tri))
-                TIR_cls_score = self.BACKBONE_HEAD(self.BACKBONE_BN(TIR_cls4tri))
+                branch_features = (RGB_cls4tri, NIR_cls4tri, TIR_cls4tri)
 
             RGB_feat_s, NIR_feat_s, TIR_feat_s, mask = self.HS_FACSS(RGB_feat=RGB_feat,
                                                                      RGB_attn=RGB_attn,
@@ -760,6 +853,12 @@ class HTLReID(nn.Module):
             else:
                 cls4t = self._concat_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
                                          quality_scores, masks=mask)
+            if not self.AL:
+                if self.branch_feature_source == 'final':
+                    branch_features = self._last_modal_features
+                RGB_cls4tri, NIR_cls4tri, TIR_cls4tri = branch_features
+                RGB_cls_score, NIR_cls_score, TIR_cls_score = self._score_modal_features(
+                    ('RGB', 'NIR', 'TIR'), branch_features)
             if self.use_ocfr:
                 RGB_cls = RGB_feat_s[:, 0, :]
                 NIR_cls = NIR_feat_s[:, 0, :]
@@ -772,36 +871,42 @@ class HTLReID(nn.Module):
             loss_aux = loss_aux + self._quality_dropout_loss(quality_scores, keep_mask)
             score = self.FUSE_HEAD(self.FUSE_BN(cls4t))
             agf_aux_pairs = self._agf_aux_pairs()
+            local_pairs = self._local_supervision_pair(
+                RGB_feat_s, NIR_feat_s, TIR_feat_s, masks=mask)
             if self.use_part:
                 part_feat = self._part_feature(RGB_feat_s, NIR_feat_s, TIR_feat_s, quality_scores, masks=mask)
                 part_score = self.PART_HEAD(self.PART_BN(part_feat))
             if self.AL:
                 if self.use_part:
                     return tuple([score, cls4t] + agf_aux_pairs +
-                                 [ori_score, ori, part_score, part_feat, loss_aux])
+                                 [ori_score, ori] + local_pairs +
+                                 [part_score, part_feat, loss_aux])
                 return tuple([score, cls4t] + agf_aux_pairs +
-                             [ori_score, ori, loss_aux])
+                             [ori_score, ori] + local_pairs + [loss_aux])
             else:
                 if self.use_part:
                     return tuple([score, cls4t] + agf_aux_pairs +
                                  [RGB_cls_score, RGB_cls4tri, NIR_cls_score,
-                                  NIR_cls4tri, TIR_cls_score, TIR_cls4tri,
-                                  part_score, part_feat, loss_aux])
+                                  NIR_cls4tri, TIR_cls_score, TIR_cls4tri] +
+                                 local_pairs +
+                                 [part_score, part_feat, loss_aux])
                 return tuple([score, cls4t] + agf_aux_pairs +
                              [RGB_cls_score, RGB_cls4tri, NIR_cls_score,
-                              NIR_cls4tri, TIR_cls_score, TIR_cls4tri, loss_aux])
+                              NIR_cls4tri, TIR_cls_score, TIR_cls4tri] +
+                             local_pairs + [loss_aux])
         else:
             RGB = x['RGB']
             NIR = x['NI']
             TIR = x['TI']
-            RGB_feat, RGB_attn = self.BACKBONE(RGB, cam_label=cam_label, view_label=view_label)
-            NIR_feat, NIR_attn = self.BACKBONE(NIR, cam_label=cam_label, view_label=view_label)
-            TIR_feat, TIR_attn = self.BACKBONE(TIR, cam_label=cam_label, view_label=view_label)
+            ((RGB_feat, RGB_attn),
+             (NIR_feat, NIR_attn),
+             (TIR_feat, TIR_attn)) = self._run_backbone_modalities(
+                (RGB, NIR, TIR), cam_label=cam_label, view_label=view_label)
             RGB_feat, NIR_feat, TIR_feat = self._adapt_features(RGB_feat, NIR_feat, TIR_feat)
             quality_scores = self.QUALITY_HEAD(RGB_feat[:, 0, :], NIR_feat[:, 0, :], TIR_feat[:, 0, :]) \
                 if self.use_quality else None
-            mask_fre = self.FREQ_INDEX(x=RGB, y=NIR, z=TIR, img_path=img_path, mode=mode, writer=writer,
-                                       step=epoch, quality_scores=quality_scores)
+            mask_fre = self._frequency_mask(
+                RGB, NIR, TIR, img_path, mode, writer, epoch, quality_scores)
 
             RGB_feat_s, NIR_feat_s, TIR_feat_s, mask = self.HS_FACSS(RGB_feat=RGB_feat,
                                                                      RGB_attn=RGB_attn,
@@ -832,23 +937,23 @@ class HTLReID(nn.Module):
             NIR = x['NI']
             RGB, NIR, _, keep_mask = self._apply_modality_dropout(
                 RGB, NIR, None, return_keep=True)
-            RGB_feat, RGB_attn = self.BACKBONE(RGB, cam_label=cam_label, view_label=view_label)
-            NIR_feat, NIR_attn = self.BACKBONE(NIR, cam_label=cam_label, view_label=view_label)
+            ((RGB_feat, RGB_attn),
+             (NIR_feat, NIR_attn)) = self._run_backbone_modalities(
+                (RGB, NIR), cam_label=cam_label, view_label=view_label)
             RGB_feat, NIR_feat, _ = self._adapt_features(RGB_feat, NIR_feat, None)
 
             RGB_cls4tri = RGB_feat[:, 0, :]
             NIR_cls4tri = NIR_feat[:, 0, :]
             quality_scores = self.QUALITY_HEAD(RGB_cls4tri, NIR_cls4tri, None) \
                 if self.use_quality else None
-            mask_fre = self.FREQ_INDEX(x=RGB, y=NIR, z=None, img_path=img_path, mode=mode, writer=writer,
-                                       step=epoch, quality_scores=quality_scores)
+            mask_fre = self._frequency_mask(
+                RGB, NIR, None, img_path, mode, writer, epoch, quality_scores)
             # Here, you need to change the head for the AL setting to 2*token_dim
             if self.AL:
                 ori = torch.cat([RGB_cls4tri, NIR_cls4tri], dim=-1)
                 ori_score = self.AL_HEAD(self.AL_BN(ori))
             else:
-                RGB_cls_score = self.BACKBONE_HEAD(self.BACKBONE_BN(RGB_cls4tri))
-                NIR_cls_score = self.BACKBONE_HEAD(self.BACKBONE_BN(NIR_cls4tri))
+                branch_features = (RGB_cls4tri, NIR_cls4tri)
 
             RGB_feat_s, NIR_feat_s, mask = self.HS_FACSS(RGB_feat=RGB_feat,
                                                          RGB_attn=RGB_attn,
@@ -868,6 +973,12 @@ class HTLReID(nn.Module):
             else:
                 cls4t = self._concat_cls(RGB_feat_s, NIR_feat_s, TIR_feat_s,
                                          quality_scores, masks=mask)
+            if not self.AL:
+                if self.branch_feature_source == 'final':
+                    branch_features = self._last_modal_features[:2]
+                RGB_cls4tri, NIR_cls4tri = branch_features
+                RGB_cls_score, NIR_cls_score = self._score_modal_features(
+                    ('RGB', 'NIR'), branch_features)
             if self.use_ocfr:
                 RGB_cls = RGB_feat_s[:, 0, :]
                 NIR_cls = NIR_feat_s[:, 0, :]
@@ -880,34 +991,39 @@ class HTLReID(nn.Module):
             loss_aux = loss_aux + self._quality_dropout_loss(quality_scores, keep_mask)
             score = self.FUSE_HEAD(self.FUSE_BN(cls4t))
             agf_aux_pairs = self._agf_aux_pairs()
+            local_pairs = self._local_supervision_pair(
+                RGB_feat_s, NIR_feat_s, TIR_feat_s, masks=mask)
             if self.use_part:
                 part_feat = self._part_feature(RGB_feat_s, NIR_feat_s, TIR_feat_s, quality_scores, masks=mask)
                 part_score = self.PART_HEAD(self.PART_BN(part_feat))
             if self.AL:
                 if self.use_part:
                     return tuple([score, cls4t] + agf_aux_pairs +
-                                 [ori_score, ori, part_score, part_feat, loss_aux])
+                                 [ori_score, ori] + local_pairs +
+                                 [part_score, part_feat, loss_aux])
                 return tuple([score, cls4t] + agf_aux_pairs +
-                             [ori_score, ori, loss_aux])
+                             [ori_score, ori] + local_pairs + [loss_aux])
             else:
                 if self.use_part:
                     return tuple([score, cls4t] + agf_aux_pairs +
                                  [RGB_cls_score, RGB_cls4tri, NIR_cls_score,
-                                  NIR_cls4tri, part_score, part_feat, loss_aux])
+                                  NIR_cls4tri] + local_pairs +
+                                 [part_score, part_feat, loss_aux])
                 return tuple([score, cls4t] + agf_aux_pairs +
                              [RGB_cls_score, RGB_cls4tri, NIR_cls_score,
-                              NIR_cls4tri, loss_aux])
+                              NIR_cls4tri] + local_pairs + [loss_aux])
 
         else:
             RGB = x['RGB']
             NIR = x['NI']
-            RGB_feat, RGB_attn = self.BACKBONE(RGB, cam_label=cam_label, view_label=view_label)
-            NIR_feat, NIR_attn = self.BACKBONE(NIR, cam_label=cam_label, view_label=view_label)
+            ((RGB_feat, RGB_attn),
+             (NIR_feat, NIR_attn)) = self._run_backbone_modalities(
+                (RGB, NIR), cam_label=cam_label, view_label=view_label)
             RGB_feat, NIR_feat, _ = self._adapt_features(RGB_feat, NIR_feat, None)
             quality_scores = self.QUALITY_HEAD(RGB_feat[:, 0, :], NIR_feat[:, 0, :], None) \
                 if self.use_quality else None
-            mask_fre = self.FREQ_INDEX(x=RGB, y=NIR, z=None, img_path=img_path, mode=mode, writer=writer,
-                                       step=epoch, quality_scores=quality_scores)
+            mask_fre = self._frequency_mask(
+                RGB, NIR, None, img_path, mode, writer, epoch, quality_scores)
 
             RGB_feat_s, NIR_feat_s, mask = self.HS_FACSS(RGB_feat=RGB_feat,
                                                          RGB_attn=RGB_attn,

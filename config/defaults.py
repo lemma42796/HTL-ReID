@@ -44,10 +44,13 @@ _C.MODEL.HEAD_KEEP = 1
 # The keep tokens in the Frequency Selection Part
 _C.MODEL.FREQUENCY_KEEP=10
 _C.MODEL.FREQUENCY_QUALITY_AWARE = 1
+_C.MODEL.FREQUENCY_ENABLED = 1
 # HS (Hierarchical Token Selection)
+_C.MODEL.HS_ENABLED = 1
 _C.MODEL.HS_LAYERS = [4, 8, 12]
 _C.MODEL.HS_K = 16
 # FACSS (Fusion-Aware Synergistic Selection)
+_C.MODEL.FACSS_ENABLED = 1
 _C.MODEL.FACSS_K = 16
 _C.MODEL.FACSS_DYNAMIC_K = 1
 _C.MODEL.FACSS_MIN_K = 8
@@ -63,10 +66,17 @@ _C.MODEL.SELECTED_AGGREGATION = 0
 _C.MODEL.SELECTED_AGG_NUM_HEADS = 12
 _C.MODEL.SELECTED_AGG_GATE_INIT_BIAS = -2.0
 _C.MODEL.SELECTED_AGG_RESIDUAL_WEIGHT = 0.5
-# Pooling for cross-modal cosine: 'max' (paper) | 'topk' | 'lse'
+_C.MODEL.BRANCH_FEATURE_SOURCE = 'backbone'
+_C.MODEL.MODALITY_SPECIFIC_HEADS = 0
+# Pooling for cross-modal cosine: 'max' (paper) | 'topk' | 'lse' | 'dual_softmax'
 _C.MODEL.FACSS_CROSS_POOL = 'max'
 _C.MODEL.FACSS_CROSS_TOPK = 3
 _C.MODEL.FACSS_CROSS_LSE_TAU = 5.0
+_C.MODEL.FACSS_MATCH_TEMP = 0.07
+# FACSS output: legacy masked full sequence | fixed differentiable local slots.
+_C.MODEL.FACSS_OUTPUT_MODE = 'masked'
+_C.MODEL.FACSS_SLOT_TEMP = 0.20
+_C.MODEL.FACSS_SLOT_SCORE_SCALE = 2.0
 # Alpha granularity: 'sample' (paper) | 'token'
 _C.MODEL.FACSS_ALPHA_GRANULARITY = 'sample'
 # Score normalization: 'minmax' (paper) | 'robust' | 'zscore'
@@ -75,6 +85,7 @@ _C.MODEL.FACSS_NORM = 'minmax'
 # forward is identical to hard top-K, backward routes through softmax of scores.
 _C.MODEL.FACSS_STE = 1
 _C.MODEL.FACSS_STE_TAU = 1.0
+_C.MODEL.FACSS_TRAIN_SOFT = 0
 # Align selected patch indices across modalities. Inspired by EDITOR/Magic
 # Tokens, the final selected mask is the union of RGB/NIR/TIR selections.
 _C.MODEL.FACSS_MODALITY_UNION = 1
@@ -94,6 +105,7 @@ _C.MODEL.AGF_GATE_INIT_BIAS = -2.0
 _C.MODEL.AGF_RESIDUAL_WEIGHT = 0.35
 _C.MODEL.AGF_LEARNABLE_RESIDUAL = 0
 _C.MODEL.AGF_RESIDUAL_INIT = 0.02
+_C.MODEL.AGF_RESIDUAL_IDENTITY_INIT = 1
 _C.MODEL.AGF_QUALITY_SCALE = 1
 _C.MODEL.AGF_FUSION_MODE = 'residual'
 _C.MODEL.AGF_CONCAT_WEIGHT = 0.35
@@ -126,6 +138,7 @@ _C.MODEL.QUALITY_PERTURB_LOSS_WEIGHT = 0.01
 _C.MODEL.FUSE_LOSS_WEIGHT = 1.0
 _C.MODEL.BRANCH_LOSS_WEIGHT = 0.5
 _C.MODEL.PART_LOSS_WEIGHT = 0.25
+_C.MODEL.LOCAL_SUPERVISION = 0
 _C.MODEL.AUX_LOSS_WEIGHT = 0.3
 _C.MODEL.AUX_WARMUP_EPOCHS = 40
 

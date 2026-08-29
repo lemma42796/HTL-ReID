@@ -1,0 +1,21 @@
+# Performance-oriented FACSS recovery: HS candidates are re-ranked with a
+# smoother top-4 cross-modal score and consumed by fixed residual fusion.
+MODEL:
+  HS_ENABLED: 1
+  FACSS_ENABLED: 1
+  FACSS_CROSS_POOL: 'topk'
+  FACSS_CROSS_TOPK: 4
+  FACSS_STE: 0
+  FACSS_TRAIN_SOFT: 1
+  FACSS_STE_TAU: 0.15
+
+  # M3 uses fixed residual cross-modal exchange; M4 replaces this update with
+  # channel-wise convex gating.
+  AGF: 1
+  AGF_MODE: 'residual_cascade'
+  AGF_USE_MASKS: 1
+  AGF_FUSION_MODE: 'residual'
+  AGF_RESIDUAL_WEIGHT: 1.0
+  AGF_LEARNABLE_RESIDUAL: 0
+
+OUTPUT_DIR: '/root/autodl-tmp/outputs/HTL-ReID-old/recovery/R003_facss_residual'

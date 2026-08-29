@@ -44,6 +44,9 @@ class CrossAttention(nn.Module):
                 ~valid[:, None, None, :],
                 torch.finfo(attn.dtype).min,
             )
+            if torch.is_floating_point(mask):
+                prior = mask.to(device=y.device, dtype=attn.dtype).clamp_min(1e-6)
+                attn = attn + prior.log()[:, None, None, :]
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
         x = (attn @ v).transpose(1, 2)
@@ -100,6 +103,33 @@ class GatedCrossAttn(nn.Module):
         return x
 
 
+class PaperGatedCrossAttn(nn.Module):
+    """Equation-faithful channel-wise convex cross-attention update.
+
+    Unlike the historical experimental blocks, this path adds no MLP residual
+    and no outer quality/residual fusion. It implements only the operation
+    stated in the submitted manuscript:
+
+        delta = CrossAttn(LN(x), patches)
+        lam = sigmoid(Linear([x; delta]))
+        out = (1 - lam) * x + lam * delta
+    """
+
+    def __init__(self, dim, num_heads=12, qkv_bias=False):
+        super().__init__()
+        self.norm = nn.LayerNorm(dim)
+        self.attn = CrossAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias)
+        self.gate = nn.Linear(2 * dim, dim)
+
+    def set_gate_bias(self, value):
+        nn.init.constant_(self.gate.bias, float(value))
+
+    def forward(self, x, patches, mask=None):
+        delta = self.attn(self.norm(x), patches, mask=mask)
+        lam = torch.sigmoid(self.gate(torch.cat([x, delta], dim=-1)))
+        return (1.0 - lam) * x + lam * delta
+
+
 class ResidualCrossAttn(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None,
                  drop=0., attn_drop=0., drop_path=0.,
@@ -149,6 +179,91 @@ class BlockRotation(nn.Module):
         return torch.cat([x_cls, y_cls, z_cls], dim=-1)
 
 
+class PaperAGFBlock(nn.Module):
+    """One paper AGF stage shared across the three modality branches."""
+
+    def __init__(self, dim, num_heads, self_aggregation=False):
+        super().__init__()
+        self.fusion = PaperGatedCrossAttn(dim, num_heads=num_heads, qkv_bias=False)
+        self.self_aggregation = bool(self_aggregation)
+
+    def set_gate_bias(self, value):
+        self.fusion.set_gate_bias(value)
+
+    def forward(self, x, y, z, masks=None):
+        if masks is None:
+            masks = (None, None, None)
+        mask_x, mask_y, mask_z = masks
+        if self.self_aggregation:
+            return (
+                self.fusion(x[:, 0, :], x[:, 1:, :], mask=mask_x),
+                self.fusion(y[:, 0, :], y[:, 1:, :], mask=mask_y),
+                self.fusion(z[:, 0, :], z[:, 1:, :], mask=mask_z),
+            )
+
+        x_cls = self.fusion(x[:, 0, :], y[:, 1:, :], mask=mask_y)
+        y_cls = self.fusion(y[:, 0, :], z[:, 1:, :], mask=mask_z)
+        z_cls = self.fusion(z[:, 0, :], x[:, 1:, :], mask=mask_x)
+        return (
+            torch.cat([x_cls.unsqueeze(1), x[:, 1:, :]], dim=1),
+            torch.cat([y_cls.unsqueeze(1), y[:, 1:, :]], dim=1),
+            torch.cat([z_cls.unsqueeze(1), z[:, 1:, :]], dim=1),
+        )
+
+
+class PaperResidualCrossAttn(nn.Module):
+    """Fixed residual counterpart used by the pre-AGF ablation.
+
+    Its output projection starts at zero so staged training begins as an
+    identity mapping instead of destroying a warm-started descriptor.
+    """
+
+    def __init__(self, dim, num_heads=12, qkv_bias=False):
+        super().__init__()
+        self.norm = nn.LayerNorm(dim)
+        self.attn = CrossAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias)
+
+    def reset_identity(self):
+        nn.init.zeros_(self.attn.proj.weight)
+        if self.attn.proj.bias is not None:
+            nn.init.zeros_(self.attn.proj.bias)
+
+    def forward(self, x, patches, mask=None):
+        return x + self.attn(self.norm(x), patches, mask=mask)
+
+
+class PaperResidualBlock(nn.Module):
+    """One fixed-residual stage with the same routing as paper AGF."""
+
+    def __init__(self, dim, num_heads, self_aggregation=False):
+        super().__init__()
+        self.fusion = PaperResidualCrossAttn(dim, num_heads=num_heads)
+        self.self_aggregation = bool(self_aggregation)
+
+    def reset_identity(self):
+        self.fusion.reset_identity()
+
+    def forward(self, x, y, z, masks=None):
+        if masks is None:
+            masks = (None, None, None)
+        mask_x, mask_y, mask_z = masks
+        if self.self_aggregation:
+            return (
+                self.fusion(x[:, 0, :], x[:, 1:, :], mask=mask_x),
+                self.fusion(y[:, 0, :], y[:, 1:, :], mask=mask_y),
+                self.fusion(z[:, 0, :], z[:, 1:, :], mask=mask_z),
+            )
+
+        x_cls = self.fusion(x[:, 0, :], y[:, 1:, :], mask=mask_y)
+        y_cls = self.fusion(y[:, 0, :], z[:, 1:, :], mask=mask_z)
+        z_cls = self.fusion(z[:, 0, :], x[:, 1:, :], mask=mask_x)
+        return (
+            torch.cat([x_cls.unsqueeze(1), x[:, 1:, :]], dim=1),
+            torch.cat([y_cls.unsqueeze(1), y[:, 1:, :]], dim=1),
+            torch.cat([z_cls.unsqueeze(1), z[:, 1:, :]], dim=1),
+        )
+
+
 class AGF(nn.Module):
     """
     Quality-aware graph fusion for nighttime RGB/NIR/TIR ReID.
@@ -163,15 +278,29 @@ class AGF(nn.Module):
     """
 
     def __init__(self, dim, num_heads, gate_init_bias=-2.0, quality_scale=True,
-                 mode='graph', tpm_steps=3, use_masks=True):
+                 mode='graph', tpm_steps=3, use_masks=True,
+                 residual_identity_init=True):
         super().__init__()
         self.quality_scale = bool(quality_scale)
         self.use_masks = bool(use_masks)
         self.mode = mode.lower()
-        if self.mode not in ('graph', 'tpm_lite', 'tpm'):
-            raise ValueError("MODEL.AGF_MODE must be 'graph', 'tpm_lite', or 'tpm'")
+        if self.mode not in ('paper_cascade', 'residual_cascade',
+                             'graph', 'tpm_lite', 'tpm'):
+            raise ValueError(
+                "MODEL.AGF_MODE must be 'paper_cascade', 'residual_cascade', "
+                "'graph', 'tpm_lite', or 'tpm'"
+            )
         self.tpm_steps = max(1, int(tpm_steps))
-        if self.mode == 'tpm_lite':
+        if self.mode == 'paper_cascade':
+            self.paper_start = PaperAGFBlock(dim, num_heads)
+            self.paper_middle = PaperAGFBlock(dim, num_heads)
+            self.paper_end = PaperAGFBlock(dim, num_heads, self_aggregation=True)
+        elif self.mode == 'residual_cascade':
+            self.residual_start = PaperResidualBlock(dim, num_heads)
+            self.residual_middle = PaperResidualBlock(dim, num_heads)
+            self.residual_end = PaperResidualBlock(
+                dim, num_heads, self_aggregation=True)
+        elif self.mode == 'tpm_lite':
             self.tpm_blocks = nn.ModuleList([
                 GatedCrossAttn(dim, num_heads, mlp_ratio=4., qkv_bias=False,
                                qk_scale=None, drop=0., attn_drop=0.,
@@ -203,7 +332,15 @@ class AGF(nn.Module):
                 nn.Linear(hidden, 1),
             )
         self.apply(self._init_weights)
-        if self.mode == 'tpm_lite':
+        if self.mode == 'paper_cascade':
+            self.paper_start.set_gate_bias(gate_init_bias)
+            self.paper_middle.set_gate_bias(gate_init_bias)
+            self.paper_end.set_gate_bias(gate_init_bias)
+        elif self.mode == 'residual_cascade' and residual_identity_init:
+            self.residual_start.reset_identity()
+            self.residual_middle.reset_identity()
+            self.residual_end.reset_identity()
+        elif self.mode == 'tpm_lite':
             for block in self.tpm_blocks:
                 block.reset_gate(gate_init_bias)
         elif self.mode == 'graph':
@@ -331,16 +468,49 @@ class AGF(nn.Module):
             ], dim=-1)
         return cls
 
-    def forward(self, x, y, z, quality_scores=None, masks=None):
+    def _paper_cascade(self, feats, masks=None):
+        masks = self._mask_tuple(masks)
+        if not self.use_masks:
+            masks = (None, None, None)
+        x, y, z = feats
+        x, y, z = self.paper_start(x, y, z, masks=masks)
+        x, z, y = self.paper_middle(
+            x, z, y, masks=(masks[0], masks[2], masks[1]))
+        nodes = self.paper_end(x, y, z, masks=masks)
+        return torch.cat(nodes, dim=-1), nodes
+
+    def _residual_cascade(self, feats, masks=None):
+        masks = self._mask_tuple(masks)
+        if not self.use_masks:
+            masks = (None, None, None)
+        x, y, z = feats
+        x, y, z = self.residual_start(x, y, z, masks=masks)
+        x, z, y = self.residual_middle(
+            x, z, y, masks=(masks[0], masks[2], masks[1]))
+        nodes = self.residual_end(x, y, z, masks=masks)
+        return torch.cat(nodes, dim=-1), nodes
+
+    def forward(self, x, y, z, quality_scores=None, masks=None,
+                return_modalities=False):
         feats = [x, y, z]
         cls_tokens = [feat[:, 0, :] for feat in feats]
         quality = self._quality_tensor(x, quality_scores)
-        if self.mode == 'tpm_lite':
-            return self._tpm_lite(feats, cls_tokens, quality, masks=masks)
-        if self.mode == 'tpm':
-            return self._tpm(feats, quality, masks=masks)
-        fused = [
-            self._fuse_node(feats, cls_tokens, quality, target_idx=i)
-            for i in range(3)
-        ]
-        return torch.cat(fused, dim=-1)
+        if self.mode == 'paper_cascade':
+            descriptor, nodes = self._paper_cascade(feats, masks=masks)
+        elif self.mode == 'residual_cascade':
+            descriptor, nodes = self._residual_cascade(feats, masks=masks)
+        elif self.mode == 'tpm_lite':
+            descriptor = self._tpm_lite(feats, cls_tokens, quality, masks=masks)
+            nodes = descriptor.chunk(3, dim=-1)
+        elif self.mode == 'tpm':
+            descriptor = self._tpm(feats, quality, masks=masks)
+            nodes = descriptor.chunk(3, dim=-1)
+        else:
+            nodes = tuple(
+                self._fuse_node(feats, cls_tokens, quality, target_idx=i)
+                for i in range(3)
+            )
+            descriptor = torch.cat(nodes, dim=-1)
+        if return_modalities:
+            return descriptor, nodes
+        return descriptor
