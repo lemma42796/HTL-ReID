@@ -1,8 +1,9 @@
 """Hierarchical Token Selection (HS).
 
-Rolls out ViT attention across layers (A_L @ ... @ A_1), keeps the per-head
-top-K patches, and unites the masks across heads and modalities. The optional
-frequency mask is merged into the same shared union. BCC and OCFR are
+Rolls out ViT attention across layers (A_L @ ... @ A_1) and keeps the per-head
+top-K patches. Legacy mode broadcasts the cross-modal union. The optional
+consensus-specific mode broadcasts evidence selected by at least two
+modalities while keeping single-modality evidence local. BCC and OCFR are
 intentionally not part of this module.
 """
 
@@ -84,21 +85,19 @@ class PartAttention(nn.Module):
 
 
 class HS(nn.Module):
-    """Select one shared patch set for all available modalities.
+    """Select legacy shared masks or consensus-specific modality masks."""
 
-    Each modality first produces a per-head attention mask. The masks are
-    united across heads and modalities, then united with the optional
-    frequency mask. When requested, each modality also summarizes patches
-    outside that shared mask into one residual token without changing the
-    hard mask.
-    """
-
-    def __init__(self, ratio=0.5, learnable_k=False, k_candidates=None,
+    def __init__(self, ratio=0.5, consensus_specific=False,
+                 learnable_k=False, k_candidates=None,
                  gumbel_tau=1.0, gumbel_tau_min=0.2,
                  gumbel_tau_decay=0.9, budget_loss_weight=0.05):
         super().__init__()
         self.part_select = PartAttention(ratio=ratio)
+        self.consensus_specific = bool(consensus_specific)
         self.learnable_k = bool(learnable_k)
+        if self.consensus_specific and self.learnable_k:
+            raise ValueError(
+                "HS consensus-specific selection currently requires fixed K")
         self.k_candidates = tuple(int(k) for k in (k_candidates or (1, 2, 4, 8, 16)))
         if any(k <= 0 for k in self.k_candidates):
             raise ValueError("HS K candidates must be positive")
@@ -174,6 +173,8 @@ class HS(nn.Module):
         candidate_weights = self._candidate_weights(epoch)
         shared_mask = None
         shared_gate = None
+        modality_masks = []
+        modality_gates = []
         modality_saliency = []
         for _, features, attentions in modalities:
             if attentions is None:
@@ -191,6 +192,8 @@ class HS(nn.Module):
                            else shared_mask | modality_mask)
             shared_gate = (modality_gate if shared_gate is None else
                            1.0 - (1.0 - shared_gate) * (1.0 - modality_gate))
+            modality_masks.append(modality_mask)
+            modality_gates.append(modality_gate)
             modality_saliency.append(saliency)
 
         if mask_fre is not None:
@@ -199,6 +202,30 @@ class HS(nn.Module):
             shared_mask = shared_mask | mask_fre.bool()
             frequency_gate = mask_fre.to(shared_gate.dtype)
             shared_gate = 1.0 - (1.0 - shared_gate) * (1.0 - frequency_gate)
+
+        consensus_mask = None
+        specific_masks = None
+        if self.consensus_specific:
+            votes = torch.stack(modality_masks, dim=0).sum(dim=0)
+            consensus_mask = votes >= min(2, len(modality_masks))
+            specific_masks = tuple(
+                modality_mask & ~consensus_mask
+                for modality_mask in modality_masks)
+            effective_masks = tuple(
+                consensus_mask | specific_mask
+                for specific_mask in specific_masks)
+            if mask_fre is not None:
+                frequency_mask = mask_fre.bool()
+                effective_masks = tuple(
+                    mask | frequency_mask for mask in effective_masks)
+            # Fixed-K masks are hard and carry no selector gradient. Keeping
+            # the gates hard makes the train/test semantics identical.
+            effective_gates = tuple(
+                mask.to(gate.dtype)
+                for mask, gate in zip(effective_masks, modality_gates))
+        else:
+            effective_masks = tuple(shared_mask for _ in modalities)
+            effective_gates = tuple(shared_gate for _ in modalities)
 
         if self.learnable_k and self.training:
             candidate_tensor = torch.tensor(
@@ -212,32 +239,46 @@ class HS(nn.Module):
         else:
             self._last_budget_loss = None
 
-        if (writer is not None and self.learnable_k and epoch is not None and
-                self._last_logged_epoch != int(epoch)):
-            probabilities = self.learned_k_probabilities()
-            expected_k = sum(
-                k * probabilities[i] for i, k in enumerate(self.k_candidates))
-            writer.add_scalar('HS/expected_k', expected_k.item(), epoch)
-            writer.add_scalar('HS/final_union_ratio',
-                              shared_mask.float().mean().item(), epoch)
+        if (writer is not None and epoch is not None and
+                self._last_logged_epoch != int(epoch) and
+                (self.learnable_k or self.consensus_specific)):
+            if self.learnable_k:
+                probabilities = self.learned_k_probabilities()
+                expected_k = sum(
+                    k * probabilities[i]
+                    for i, k in enumerate(self.k_candidates))
+                writer.add_scalar('HS/expected_k', expected_k.item(), epoch)
+                writer.add_scalar('HS/final_union_ratio',
+                                  shared_mask.float().mean().item(), epoch)
+            if self.consensus_specific:
+                writer.add_scalar(
+                    'HS/consensus_ratio',
+                    consensus_mask.float().mean().item(), epoch)
+                for index, (name, _, _) in enumerate(modalities):
+                    writer.add_scalar(
+                        'HS/{}_specific_ratio'.format(name),
+                        specific_masks[index].float().mean().item(), epoch)
+                    writer.add_scalar(
+                        'HS/{}_effective_ratio'.format(name),
+                        effective_masks[index].float().mean().item(), epoch)
             self._last_logged_epoch = int(epoch)
 
         selected = {
-            name: self._mask_features(features, shared_gate)
-            for name, features, _ in modalities
+            name: self._mask_features(features, gate)
+            for (name, features, _), gate in zip(modalities, effective_gates)
         }
-        masks = tuple(shared_mask for _ in modalities)
+        masks = effective_masks
         result = tuple(selected[name] for name, _, _ in modalities) + (masks,)
 
         # Preserve the hard-gate portion of the selector contract used by ACI.
         if return_gates:
-            gate = shared_gate.to(RGB_feat.dtype)
-            result += (tuple(gate for _ in modalities),)
+            result += (tuple(
+                gate.to(RGB_feat.dtype) for gate in effective_gates),)
         if return_residual_tokens:
             residual_tokens = tuple(
-                self._residual_token(features, shared_mask, saliency)
-                for (_, features, _), saliency in zip(
-                    modalities, modality_saliency)
+                self._residual_token(features, mask, saliency)
+                for (_, features, _), mask, saliency in zip(
+                    modalities, effective_masks, modality_saliency)
             )
             result += (residual_tokens,)
         return result

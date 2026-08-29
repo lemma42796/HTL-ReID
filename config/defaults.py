@@ -50,6 +50,9 @@ _C.MODEL.FREQUENCY_ENABLED = 1
 # the official EDITOR source.
 _C.MODEL.HS_ENABLED = 0
 _C.MODEL.HS_RATIO = 0.5
+# Preserve consensus evidence across modalities while keeping evidence selected
+# by only one modality local to that modality. Disabled for legacy checkpoints.
+_C.MODEL.HS_CONSENSUS_SPECIFIC = 0
 # Learn a dataset-level discrete tokens-per-head K with a straight-through
 # Gumbel-Softmax architecture choice. The final union density is regularized
 # so identification loss cannot trivially collapse the choice to maximum K.

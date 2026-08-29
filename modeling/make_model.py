@@ -280,6 +280,8 @@ class HTLReID(nn.Module):
         if self.use_hs:
             self.HS = HS(
                 ratio=cfg.MODEL.HS_RATIO,
+                consensus_specific=bool(
+                    cfg.MODEL.HS_CONSENSUS_SPECIFIC),
                 learnable_k=bool(cfg.MODEL.HS_LEARNABLE_K),
                 k_candidates=cfg.MODEL.HS_K_CANDIDATES,
                 gumbel_tau=cfg.MODEL.HS_GUMBEL_TAU,
