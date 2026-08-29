@@ -122,7 +122,9 @@ def save_hs_figure(capture, paths, consensus_specific, output):
     frequency = [
         effective[index] & ~structural[index] for index in range(3)]
     images = [Image.open(path).convert('RGB') for path in paths]
-    fig, axes = plt.subplots(3, 6, figsize=(16.2, 9.0))
+    fig, axes = plt.subplots(
+        3, 6, figsize=(11.8, 9.0),
+        gridspec_kw={'wspace': 0.08, 'hspace': 0.06})
     broadcast_title = (
         'Consensus broadcast' if consensus_specific else 'Union broadcast')
     titles = (
@@ -144,7 +146,7 @@ def save_hs_figure(capture, paths, consensus_specific, output):
                 axes[row, column].set_title(titles[column], fontsize=10)
             if column == 0:
                 axes[row, column].set_ylabel(name, fontsize=11)
-    fig.tight_layout()
+    fig.subplots_adjust(left=0.01, right=0.99, top=0.94, bottom=0.01)
     fig.savefig(output, dpi=220, bbox_inches='tight')
     plt.close(fig)
 
@@ -162,7 +164,7 @@ def save_robustness_figure(summary, output):
     axes[0].bar(
         x - width / 2,
         [baseline['metrics'][name]['mAP'] for name in missing],
-        width, label='Clean old T14', color='#9E9E9E')
+        width, label='Reference', color='#9E9E9E')
     axes[0].bar(
         x + width / 2,
         [final['metrics'][name]['mAP'] for name in missing],

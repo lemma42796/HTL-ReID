@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1900" height="820" viewBox="0 0 1900 820">
 <title>Final architecture of HTL-ReID</title>
-<desc>Compact E060 architecture: shared ViT, HS, main selector branch, gradient-isolated FACR, three-stripe part branch, and the final 11520-dimensional descriptor.</desc>
+<desc>Compact E060 architecture: shared ViT, HS, main selector branch, gradient-isolated ACI, three-stripe part branch, and the final 11520-dimensional descriptor.</desc>
 <defs>
  <style>
  text{font-family:"Times New Roman",Times,serif;fill:#222}.mt{font-size:25px;font-weight:700}.st{font-size:18px;font-weight:700}.lb{font-size:16px;font-weight:700}.tx{font-size:14px}.sm{font-size:12px}.tn{font-size:10.5px}
@@ -58,7 +58,7 @@
 <!-- Complete-token bus between rows -->
 <path d="M359 384H824" fill="none" stroke="#222" stroke-width="1.7"/><text x="586" y="379" text-anchor="middle" class="sm">complete RGB / NIR / TIR token bus</text>
 
-<!-- Three-stripe part branch in the original PLR position -->
+<!-- Three-stripe part branch -->
 <g><rect x="392" y="402" width="424" height="380" rx="4" class="grp"/><text x="604" y="432" text-anchor="middle" class="mt">Three-Stripe Part Branch</text><text x="604" y="452" text-anchor="middle" class="sm">coarse local representation from HS-masked patches</text><path d="M693 234V384H424V485" class="mf"/>
  <g transform="translate(425 478)"><text y="26" class="lb" fill="#548a4b">RGB</text><use xlink:href="#sgrid" x="51" y="2"/><path d="M93 19H123" class="th"/><g class="r"><rect x="124" width="42" height="12"/><rect x="124" y="14" width="42" height="12"/><rect x="124" y="28" width="42" height="12"/></g><text x="145" y="58" text-anchor="middle" class="tn">3 stripes</text><path d="M168 20H204" class="th"/><rect x="205" y="5" width="108" height="30" class="r"/><text x="259" y="25" text-anchor="middle" class="sm">stripe features</text></g>
  <g transform="translate(425 568)"><text y="26" class="lb" fill="#527ca7">NIR</text><use xlink:href="#sgrid" x="51" y="2"/><path d="M93 19H123" class="th"/><g class="n"><rect x="124" width="42" height="12"/><rect x="124" y="14" width="42" height="12"/><rect x="124" y="28" width="42" height="12"/></g><text x="145" y="58" text-anchor="middle" class="tn">3 stripes</text><path d="M168 20H204" class="th"/><rect x="205" y="5" width="108" height="30" class="n"/><text x="259" y="25" text-anchor="middle" class="sm">stripe features</text></g>
@@ -66,20 +66,20 @@
  <path d="M738 498H776V687M738 588H776M738 678H776" class="th"/><circle cx="776" cy="715" r="20" class="w"/><text x="776" y="720" text-anchor="middle" class="lb">C</text><text x="776" y="748" text-anchor="middle" class="sm">6912-D</text><text x="604" y="767" text-anchor="middle" class="tn">3 modalities × 3 stripes × 768 · loss × 0.15</text>
 </g>
 
-<!-- Gradient-isolated FACR in the original lower fusion position -->
-<g><rect x="846" y="402" width="648" height="380" rx="4" class="grp"/><text x="1170" y="432" text-anchor="middle" class="mt">Gradient-Isolated FACR</text><text x="1170" y="452" text-anchor="middle" class="sm">three-stage mask-constrained adaptive cross-modal routing</text>
+<!-- Gradient-isolated ACI in the lower interaction position -->
+<g><rect x="846" y="402" width="648" height="380" rx="4" class="grp"/><text x="1170" y="432" text-anchor="middle" class="mt">Gradient-Isolated ACI</text><text x="1170" y="452" text-anchor="middle" class="sm">three-stage mask-constrained adaptive cross-modal interaction</text>
  <path d="M824 384V570H848" class="f"/><circle cx="873" cy="570" r="21" class="w"/><path d="M873 543V597" class="sg"/><text x="873" y="567" text-anchor="middle" class="lb">SG</text><text x="873" y="583" text-anchor="middle" class="tn">detach</text><path d="M894 570H909" class="f"/>
  <path d="M693 235V384H996V481" class="mf"/><text x="960" y="475" class="tn">hard mask</text>
  <g transform="translate(910 492)"><use xlink:href="#facrStage"/><text x="85" y="24" text-anchor="middle" class="lb">Stage 1</text></g><path d="M1080 567H1099" class="f"/>
  <g transform="translate(1100 492)"><use xlink:href="#facrStage"/><text x="85" y="24" text-anchor="middle" class="lb">Stage 2</text></g><path d="M1270 567H1289" class="f"/>
  <g transform="translate(1290 492)"><use xlink:href="#facrStage"/><text x="85" y="24" text-anchor="middle" class="lb">Stage 3</text></g>
- <path d="M1375 642V666" class="th"/><rect x="1088" y="667" width="332" height="60" rx="3" class="exp"/><text x="1254" y="691" text-anchor="middle" class="lb">Independent BNNeck + classifier</text><text x="1254" y="712" text-anchor="middle" class="sm">2304-D · branch loss × 0.50</text><path d="M1420 697H1475" class="f"/><text x="1438" y="687" class="tn">z<tspan baseline-shift="sub">facr</tspan></text><text x="1170" y="760" text-anchor="middle" class="sm mut">FACR gradients cannot alter the shared backbone or main selector branch</text>
+ <path d="M1375 642V666" class="th"/><rect x="1088" y="667" width="332" height="60" rx="3" class="exp"/><text x="1254" y="691" text-anchor="middle" class="lb">Independent BNNeck + classifier</text><text x="1254" y="712" text-anchor="middle" class="sm">2304-D · branch loss × 0.50</text><path d="M1420 697H1475" class="f"/><text x="1438" y="687" class="tn">z<tspan baseline-shift="sub">aci</tspan></text><text x="1170" y="760" text-anchor="middle" class="sm mut">ACI gradients cannot alter the shared backbone or main selector branch</text>
 </g>
 
 <!-- Final descriptor, same compact vertical structure as the original -->
 <g><rect x="1530" y="402" width="346" height="380" rx="4" class="grp"/><text x="1703" y="432" text-anchor="middle" class="mt">Final Descriptor</text><text x="1703" y="452" text-anchor="middle" class="sm">branch norm. → fixed weight → concatenate</text>
  <path d="M1494 221H1518V493H1560" class="f"/><rect x="1560" y="468" width="198" height="50" class="neu"/><text x="1576" y="490" class="lb">Main selector</text><text x="1576" y="508" class="sm">2304-D</text><text x="1738" y="498" text-anchor="end" class="lb">× 1.00</text>
- <path d="M1475 697H1518V561H1560" class="f"/><rect x="1560" y="536" width="198" height="50" class="neu"/><text x="1576" y="558" class="lb">Isolated FACR</text><text x="1576" y="576" class="sm">2304-D</text><text x="1738" y="566" text-anchor="end" class="lb">× 0.25</text>
+ <path d="M1475 697H1518V561H1560" class="f"/><rect x="1560" y="536" width="198" height="50" class="neu"/><text x="1576" y="558" class="lb">Isolated ACI</text><text x="1576" y="576" class="sm">2304-D</text><text x="1738" y="566" text-anchor="end" class="lb">× 0.25</text>
  <path d="M796 715H826V795H1518V629H1560" class="f"/><rect x="1560" y="604" width="198" height="50" class="neu"/><text x="1576" y="626" class="lb">Three-stripe part</text><text x="1576" y="644" class="sm">6912-D</text><text x="1738" y="634" text-anchor="end" class="lb">× 0.30</text>
  <path d="M1758 493H1801V654M1758 561H1801M1758 629H1801" class="th"/><circle cx="1801" cy="682" r="25" class="w"/><text x="1801" y="688" text-anchor="middle" class="lb">C</text><path d="M1801 707V724" class="f"/><rect x="1588" y="726" width="238" height="40" rx="20" class="w"/><text x="1707" y="746" text-anchor="middle" class="lb">11,520-D retrieval descriptor</text><text x="1707" y="761" text-anchor="middle" class="tn">single view · no TTA · no re-ranking</text>
 </g>
