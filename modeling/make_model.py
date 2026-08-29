@@ -310,7 +310,14 @@ class HTLReID(nn.Module):
         self.hetero_triplet_weight = float(cfg.MODEL.HETERO_TRIPLET_WEIGHT)
         self.hetero_triplet_margin = float(cfg.MODEL.HETERO_TRIPLET_MARGIN)
         self.use_decoupled_moe = bool(cfg.MODEL.DECOUPLED_MOE)
+        self.use_cruf = bool(cfg.MODEL.CRUF_ENABLED)
+        self.cruf_utility_loss_weight = float(
+            cfg.MODEL.CRUF_UTILITY_LOSS_WEIGHT)
+        self.cruf_final_descriptor = bool(
+            cfg.MODEL.CRUF_FINAL_DESCRIPTOR)
+        self.cruf_include_aci = bool(cfg.MODEL.CRUF_INCLUDE_ACI)
         self._last_aci_stats_epoch = None
+        self._last_cruf_stats_epoch = None
         if self.use_aci and self.aci_use_scores:
             raise ValueError('ACI_USE_SCORES requires continuous selector scores, '
                              'which the HS selector does not provide')
@@ -352,6 +359,18 @@ class HTLReID(nn.Module):
             cfg.MODEL.DECOUPLED_MOE_LOSS_WEIGHT)
         if self.decoupled_moe_loss_weight < 0.0:
             raise ValueError('DECOUPLED_MOE_LOSS_WEIGHT must be non-negative')
+        if self.use_cruf and not self.use_decoupled_moe:
+            raise ValueError('CRUF_ENABLED requires DECOUPLED_MOE')
+        if self.cruf_utility_loss_weight < 0.0:
+            raise ValueError(
+                'CRUF_UTILITY_LOSS_WEIGHT must be non-negative')
+        if self.cruf_final_descriptor and not self.use_cruf:
+            raise ValueError(
+                'CRUF_FINAL_DESCRIPTOR requires CRUF_ENABLED')
+        if (self.cruf_final_descriptor and self.cruf_include_aci and
+                not self.use_aci):
+            raise ValueError(
+                'CRUF_INCLUDE_ACI requires ACI when the final descriptor is enabled')
         self.use_ocfr = bool(cfg.MODEL.OCFR)
         self.use_quality = bool(cfg.MODEL.QUALITY_AWARE)
         self.use_adapter = bool(cfg.MODEL.MODALITY_ADAPTER)
@@ -472,6 +491,8 @@ class HTLReID(nn.Module):
                 num_heads=cfg.MODEL.DECOUPLED_MOE_NUM_HEADS,
                 gate_heads=cfg.MODEL.DECOUPLED_MOE_GATE_HEADS,
                 dropout=cfg.MODEL.DECOUPLED_MOE_DROPOUT,
+                utility_fusion=self.use_cruf,
+                utility_temperature=cfg.MODEL.CRUF_UTILITY_TEMPERATURE,
             )
         if self.use_adapter:
             self.MODALITY_ADAPTERS = nn.ModuleDict({
@@ -507,6 +528,14 @@ class HTLReID(nn.Module):
             self.DECOUPLED_MOE_HEAD = nn.Linear(
                 moe_dim, num_classes, bias=False)
             self.DECOUPLED_MOE_HEAD.apply(weights_init_classifier)
+            if self.cruf_final_descriptor:
+                final_dim = moe_dim
+                if self.cruf_include_aci:
+                    final_dim += self.fuse_dim
+                self.CRUF_FINAL_BN = nn.BatchNorm1d(final_dim)
+                self.CRUF_FINAL_HEAD = nn.Linear(
+                    final_dim, num_classes, bias=False)
+                self.CRUF_FINAL_HEAD.apply(weights_init_classifier)
 
         # The output learning params of RGB/NIR/TIR cls tokens
         self.BACKBONE_HEAD = nn.Linear(self.BACKBONE.token_dim, num_classes, bias=False)
@@ -706,6 +735,18 @@ class HTLReID(nn.Module):
                 torch.sigmoid(self.ACI_RESIDUAL_LOGIT).item(), epoch)
         self._last_aci_stats_epoch = int(epoch)
 
+    def _log_cruf_statistics(self, writer, epoch):
+        if (not self.use_cruf or writer is None or epoch is None or
+                self._last_cruf_stats_epoch == int(epoch)):
+            return
+        for name, value in self.DECOUPLED_MOE.gate_statistics().items():
+            writer.add_scalar(
+                'CRUF/gate_{}'.format(name), value.item(), epoch)
+        for name, value in self.DECOUPLED_MOE.utility_statistics().items():
+            writer.add_scalar(
+                'CRUF/target_{}'.format(name), value.item(), epoch)
+        self._last_cruf_stats_epoch = int(epoch)
+
     def _apply_modality_dropout(self, rgb, nir, tir=None, return_keep=False):
         if (not self.training) or self.modality_drop_prob <= 0:
             if not return_keep:
@@ -803,6 +844,15 @@ class HTLReID(nn.Module):
                                                quality_scores=quality_scores, masks=masks)
         return self._stripe_part_feature(rgb_feat, nir_feat, tir_feat,
                                          quality_scores=quality_scores)
+
+    def _cruf_descriptor(self, aci_feat, route_feat):
+        if not self.cruf_final_descriptor:
+            raise RuntimeError('CRUF final descriptor is disabled')
+        blocks = []
+        if self.cruf_include_aci:
+            blocks.append(F.normalize(aci_feat, dim=-1))
+        blocks.append(F.normalize(route_feat, dim=-1))
+        return torch.cat(blocks, dim=-1)
 
     def _test_descriptor(self, cls4t, rgb_feat, nir_feat, tir_feat,
                          quality_scores=None, masks=None,
@@ -1097,18 +1147,51 @@ class HTLReID(nn.Module):
             loss_aux = loss_aux + self._cross_modal_reconstruction_loss(
                 (RGB_feat, NIR_feat, TIR_feat))
             self._log_aci_statistics(writer, epoch)
-            score = self.FUSE_HEAD(self.FUSE_BN(cls4t))
+            score = None
+            if not self.cruf_final_descriptor:
+                score = self.FUSE_HEAD(self.FUSE_BN(cls4t))
             if self.aci_isolated_branch:
                 isolated_aci_score = self.ACI_ISOLATED_HEAD(
                     self.ACI_ISOLATED_BN(isolated_aci_feat))
             if self.use_decoupled_moe:
-                decoupled_moe_feat = self.DECOUPLED_MOE(
-                    RGB_feat, NIR_feat, TIR_feat)
+                if self.use_cruf:
+                    decoupled_moe_feat, cruf_routes, cruf_gates = (
+                        self.DECOUPLED_MOE(
+                            RGB_feat, NIR_feat, TIR_feat,
+                            return_details=True))
+                    if self.cruf_utility_loss_weight > 0.0:
+                        loss_aux = loss_aux + (
+                            self.cruf_utility_loss_weight *
+                            self.DECOUPLED_MOE.counterfactual_utility_loss(
+                                cruf_routes, cruf_gates, label))
+                    self._log_cruf_statistics(writer, epoch)
+                else:
+                    decoupled_moe_feat = self.DECOUPLED_MOE(
+                        RGB_feat, NIR_feat, TIR_feat)
                 decoupled_moe_score = self.DECOUPLED_MOE_HEAD(
                     self.DECOUPLED_MOE_BN(decoupled_moe_feat))
+                if self.cruf_final_descriptor:
+                    cruf_final_feat = self._cruf_descriptor(
+                        cls4t, decoupled_moe_feat)
+                    cruf_final_score = self.CRUF_FINAL_HEAD(
+                        self.CRUF_FINAL_BN(cruf_final_feat))
             if self.use_part:
                 part_feat = self._part_feature(RGB_feat_s, NIR_feat_s, TIR_feat_s, quality_scores, masks=mask)
                 part_score = self.PART_HEAD(self.PART_BN(part_feat))
+            if self.cruf_final_descriptor:
+                output = [
+                    cruf_final_score, cruf_final_feat,
+                    decoupled_moe_score, decoupled_moe_feat]
+                if self.AL:
+                    output += [ori_score, ori]
+                else:
+                    output += [
+                        RGB_cls_score, RGB_cls4tri, NIR_cls_score,
+                        NIR_cls4tri, TIR_cls_score, TIR_cls4tri]
+                if self.use_part:
+                    output += [part_score, part_feat]
+                output += [loss_aux]
+                return tuple(output)
             if self.AL:
                 output = [score, cls4t]
                 if self.aci_isolated_branch:
@@ -1183,6 +1266,18 @@ class HTLReID(nn.Module):
             if self.use_decoupled_moe:
                 decoupled_moe_feat = self.DECOUPLED_MOE(
                     RGB_feat, NIR_feat, TIR_feat)
+            if self.cruf_final_descriptor:
+                final_descriptor = self._cruf_descriptor(
+                    cls4t, decoupled_moe_feat)
+                if return_descriptor_components:
+                    components = self._test_descriptor_components(
+                        cls4t, RGB_feat_s, NIR_feat_s, TIR_feat_s,
+                        quality_scores, masks=mask,
+                        decoupled_moe_feat=decoupled_moe_feat,
+                        isolated_aci_feat=isolated_aci_feat)
+                    components['final'] = final_descriptor
+                    return components
+                return final_descriptor
             if return_descriptor_components:
                 return self._test_descriptor_components(
                     cls4t, RGB_feat_s, NIR_feat_s, TIR_feat_s,

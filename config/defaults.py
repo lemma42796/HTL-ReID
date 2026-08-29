@@ -117,6 +117,16 @@ _C.MODEL.DECOUPLED_MOE_NUM_HEADS = 12
 _C.MODEL.DECOUPLED_MOE_GATE_HEADS = 4
 _C.MODEL.DECOUPLED_MOE_DROPOUT = 0.1
 _C.MODEL.DECOUPLED_MOE_LOSS_WEIGHT = 1.0
+# Counterfactual Retrieval-Utility Fusion (CRUF). The historical DHF output
+# remains the default. When enabled, its seven routes are mixed into one
+# descriptor and the gate learns leave-one-route-out retrieval contribution.
+_C.MODEL.CRUF_ENABLED = 0
+_C.MODEL.CRUF_UTILITY_TEMPERATURE = 1.0
+_C.MODEL.CRUF_UTILITY_LOSS_WEIGHT = 0.2
+# Train and return the exact fixed descriptor used for retrieval: normalized
+# ACI evidence concatenated with the normalized CRUF mixture.
+_C.MODEL.CRUF_FINAL_DESCRIPTOR = 0
+_C.MODEL.CRUF_INCLUDE_ACI = 1
 # OCFR auxiliary loss (not in paper); off by default for paper-faithful reproduction
 _C.MODEL.OCFR = 0
 # Nighttime modality reliability. The prior only initializes the quality head:

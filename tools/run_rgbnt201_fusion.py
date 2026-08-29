@@ -51,6 +51,7 @@ RANK_PATTERNS = {
 def resolve_config(row_config, output_dir, seed=DEFAULT_SEED,
                    base_config=BASE_CONFIG, input_size=INPUT_SIZE,
                    dataset="RGBNT201",
+                   eval_period=EVAL_PERIOD,
                    expected_train_epochs=TRAIN_EPOCHS,
                    expected_base_lr=3.5e-4,
                    expected_batch_size=BATCH_SIZE,
@@ -63,7 +64,7 @@ def resolve_config(row_config, output_dir, seed=DEFAULT_SEED,
     cfg.merge_from_file(base_config)
     cfg.merge_from_file(row_config)
     cfg.OUTPUT_DIR = str(output_dir)
-    cfg.SOLVER.EVAL_PERIOD = EVAL_PERIOD
+    cfg.SOLVER.EVAL_PERIOD = int(eval_period)
     cfg.SOLVER.SEED = int(seed)
     if int(cfg.SOLVER.TRAIN_EPOCHS) != int(expected_train_epochs):
         raise ValueError(
@@ -185,6 +186,7 @@ def run_row(args, timeout_bin, commit, experiment, row, row_config,
         row_config, output_dir, seed=args.seed,
         base_config=args.base_config, input_size=args.input_size,
         dataset=args.dataset,
+        eval_period=args.eval_period,
         expected_train_epochs=args.expected_train_epochs,
         expected_base_lr=args.expected_base_lr,
         expected_batch_size=args.expected_batch_size,
@@ -201,7 +203,7 @@ def run_row(args, timeout_bin, commit, experiment, row, row_config,
         "--config_file", args.base_config,
         "--config_file", row_config,
         "OUTPUT_DIR", str(output_dir),
-        "SOLVER.EVAL_PERIOD", str(EVAL_PERIOD),
+        "SOLVER.EVAL_PERIOD", str(args.eval_period),
         "SOLVER.SEED", str(args.seed),
     ]
     run_env = os.environ.copy()
@@ -263,6 +265,7 @@ def main():
     parser.add_argument("--single-config")
     parser.add_argument("--single-output-name")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument("--eval-period", type=int, default=EVAL_PERIOD)
     parser.add_argument(
         "--expected-train-epochs", type=int, default=TRAIN_EPOCHS)
     parser.add_argument(
@@ -280,6 +283,8 @@ def main():
     args.output_root = args.output_root.resolve()
     if args.seed < 0:
         parser.error("--seed must be non-negative")
+    if args.eval_period <= 0:
+        parser.error("--eval-period must be positive")
     if args.expected_train_epochs <= 0:
         parser.error("--expected-train-epochs must be positive")
     if args.expected_base_lr <= 0:
@@ -313,6 +318,7 @@ def main():
             row_config, output_dir, seed=args.seed,
             base_config=args.base_config, input_size=args.input_size,
             dataset=args.dataset,
+            eval_period=args.eval_period,
             expected_train_epochs=args.expected_train_epochs,
             expected_base_lr=args.expected_base_lr,
             expected_batch_size=args.expected_batch_size,
@@ -343,7 +349,7 @@ def main():
             "resume_path": str(resolved_cfg.MODEL.RESUME_PATH),
             "strict_determinism": int(
                 resolved_cfg.SOLVER.STRICT_DETERMINISM),
-            "eval_period": EVAL_PERIOD,
+            "eval_period": args.eval_period,
             "re_ranking": "no",
             "time_limit_per_row": TIME_LIMIT,
         })
