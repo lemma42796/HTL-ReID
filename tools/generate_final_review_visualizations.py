@@ -13,16 +13,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 import torch
-import torch.nn.functional as F
 
 from generate_paper_visualizations import (
     canonical_paths,
-    distance_matrix,
     mask_heat,
-    metrics,
     save_aci_figure,
-    save_ranklist_figure,
-    save_tsne_figure,
 )
 from review_evidence_common import build_eval_run, require_cuda, set_seed
 
@@ -33,8 +28,6 @@ MODALITIES = ('RGB', 'NIR', 'TIR')
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--base-config', type=Path, required=True)
-    parser.add_argument('--baseline-config', type=Path, required=True)
-    parser.add_argument('--baseline-checkpoint', type=Path, required=True)
     parser.add_argument('--final-config', type=Path, required=True)
     parser.add_argument('--final-checkpoint', type=Path, required=True)
     parser.add_argument('--robustness-summary', type=Path, required=True)
@@ -70,7 +63,7 @@ def install_hs_hooks(model):
 
 
 def extract(model, loader, test_dir, capture_internal=False):
-    features, pids, camids, paths = [], [], [], []
+    pids, camids, paths = [], [], []
     route_values = []
     capture, handles = ({}, [])
     if capture_internal:
@@ -86,7 +79,6 @@ def extract(model, loader, test_dir, capture_internal=False):
             feature = model(
                 images, cam_label=camera_labels, view_label=view_labels,
                 mode=1, img_path=batch_paths)
-            features.append(F.normalize(feature.float(), dim=1).cpu())
             pids.extend(np.asarray(vid).tolist())
             camids.extend(np.asarray(camid).tolist())
             paths.extend(canonical_paths(batch_paths, test_dir))
@@ -100,7 +92,6 @@ def extract(model, loader, test_dir, capture_internal=False):
     for handle in handles:
         handle.remove()
     return {
-        'feature': torch.cat(features),
         'pids': np.asarray(pids),
         'camids': np.asarray(camids),
         'paths': paths,
@@ -204,8 +195,7 @@ def main():
     args = parse_args()
     require_cuda()
     for path in (
-            args.base_config, args.baseline_config, args.baseline_checkpoint,
-            args.final_config, args.final_checkpoint,
+            args.base_config, args.final_config, args.final_checkpoint,
             args.robustness_summary):
         if not path.is_file():
             raise FileNotFoundError(path)
@@ -223,9 +213,6 @@ def main():
     test_dir = Path(final_cfg.DATASETS.ROOT_DIR) / dataset_name / 'test'
     final = extract(
         final_model, final_loader, test_dir, capture_internal=True)
-    final_distance = distance_matrix(final['feature'], num_query)
-    final_metric = metrics(
-        final_distance, final['pids'], final['camids'], num_query)
     save_hs_figure(
         final['capture'], final['paths'][0],
         bool(final_cfg.MODEL.HS_CONSENSUS_SPECIFIC),
@@ -235,31 +222,6 @@ def main():
     final_model.cpu()
     del final_model, final_loader
     torch.cuda.empty_cache()
-
-    _, baseline_model, baseline_loader, baseline_num_query = build_eval_run(
-        args.base_config, args.baseline_config, args.baseline_checkpoint,
-        seed=args.seed, test_batch_size=args.batch_size)
-    if baseline_num_query != num_query:
-        raise RuntimeError('baseline and final query counts differ')
-    baseline = extract(baseline_model, baseline_loader, test_dir)
-    if not (np.array_equal(baseline['pids'], final['pids']) and
-            np.array_equal(baseline['camids'], final['camids'])):
-        raise RuntimeError('baseline and final evaluation orders differ')
-    baseline_distance = distance_matrix(baseline['feature'], num_query)
-    baseline_metric = metrics(
-        baseline_distance, baseline['pids'], baseline['camids'], num_query)
-    baseline_model.cpu()
-    del baseline_model, baseline_loader
-    torch.cuda.empty_cache()
-
-    save_tsne_figure(
-        baseline['feature'], final['feature'], final['pids'], final['paths'],
-        num_query, args.seed,
-        args.output_dir / 'fig_tsne_backbone_final.png')
-    save_ranklist_figure(
-        baseline_distance, final_distance, final['pids'], final['camids'],
-        final['paths'], num_query,
-        args.output_dir / 'fig_ranklist_backbone_final.png')
     robustness = json.loads(
         args.robustness_summary.read_text(encoding='utf-8'))
     save_robustness_figure(
@@ -271,12 +233,11 @@ def main():
         'test_batch_size': args.batch_size,
         're_ranking': False,
         'tta': False,
-        'baseline_role': 'qualitative backbone reference only',
-        'baseline_config': str(args.baseline_config),
-        'baseline_checkpoint': str(args.baseline_checkpoint),
         'final_config': str(args.final_config),
         'final_checkpoint': str(args.final_checkpoint),
-        'metrics': {'baseline': baseline_metric, 'final': final_metric},
+        'num_query': int(num_query),
+        'num_total': int(len(final['pids'])),
+        'robustness_summary': str(args.robustness_summary),
         'elapsed_seconds': round(time.monotonic() - started, 3),
         'figures': sorted(path.name for path in args.output_dir.glob('*.png')),
     }

@@ -17,9 +17,6 @@ CHAIN_NAME = 'E066_E068_review_evidence'
 BASE_CONFIG = 'configs/RGBNT201/paper/base.yml'
 BASELINE_CONFIG = 'configs/RGBNT201/ablations/t14_chain/a0_backbone.yml'
 OLD_T14_CONFIG = 'configs/RGBNT201/fusion/t14_clean_baseline.yml'
-BASELINE_CHECKPOINT = (
-    '/root/autodl-tmp/outputs/HTL-ReID/'
-    'E049_A0_backbone_RGBNT201_seed1111/HTL-ReID_best.pth')
 OLD_T14_CHECKPOINT = (
     '/root/autodl-tmp/outputs/HTL-ReID/'
     'E057_T14_clean_baseline_RGBNT201_seed1111/HTL-ReID_best.pth')
@@ -151,8 +148,6 @@ def main():
             'command': [
                 args.python, 'tools/generate_final_review_visualizations.py',
                 '--base-config', BASE_CONFIG,
-                '--baseline-config', BASELINE_CONFIG,
-                '--baseline-checkpoint', BASELINE_CHECKPOINT,
                 '--final-config', final['config'],
                 '--final-checkpoint', final['checkpoint'],
                 '--robustness-summary',
@@ -168,8 +163,7 @@ def main():
         args.repo_root / BASELINE_CONFIG,
         args.repo_root / OLD_T14_CONFIG,
         args.repo_root / final['config'],
-        Path(BASELINE_CHECKPOINT), Path(OLD_T14_CHECKPOINT),
-        Path(final['checkpoint']),
+        Path(OLD_T14_CHECKPOINT), Path(final['checkpoint']),
     ]
     missing = [path for path in required if not path.is_file()]
     if missing:
