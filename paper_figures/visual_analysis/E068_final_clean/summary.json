@@ -1,0 +1,18 @@
+{
+  "dataset": "RGBNT201",
+  "seed": 1111,
+  "test_batch_size": 64,
+  "re_ranking": false,
+  "tta": false,
+  "final_config": "configs/RGBNT201/fusion/a3_isolated_clean.yml",
+  "final_checkpoint": "/root/autodl-tmp/outputs/HTL-ReID/E060_A3_isolated_clean_RGBNT201_seed1111/HTL-ReID_best.pth",
+  "num_query": 836,
+  "num_total": 1672,
+  "robustness_summary": "/root/autodl-tmp/outputs/HTL-ReID/E067_final_robustness/summary.json",
+  "elapsed_seconds": 11.081,
+  "figures": [
+    "fig_facr_routing.png",
+    "fig_hs_consensus_specific.png",
+    "fig_robustness.png"
+  ]
+}
