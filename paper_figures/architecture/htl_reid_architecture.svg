@@ -1,206 +1,86 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1900" height="1060" viewBox="0 0 1900 1060">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1900" height="820" viewBox="0 0 1900 820">
 <title>Final architecture of HTL-ReID</title>
-<desc>Frozen E060 architecture with shared ViT encoding, hierarchical selection, a main selector descriptor, a gradient-isolated FACR branch, a three-stripe part branch, and an 11520-dimensional retrieval descriptor.</desc>
+<desc>Compact E060 architecture: shared ViT, HS, main selector branch, gradient-isolated FACR, three-stripe part branch, and the final 11520-dimensional descriptor.</desc>
 <defs>
-  <style>
-    text{font-family:"Times New Roman",Times,serif;fill:#20242a}
-    .title{font-size:27px;font-weight:700}.head{font-size:22px;font-weight:700}.subhead{font-size:17px;font-weight:700}
-    .label{font-size:15px;font-weight:700}.body{font-size:14px}.small{font-size:12px}.tiny{font-size:10.5px}
-    .group{fill:#fff;stroke:#59636f;stroke-width:1.7;stroke-dasharray:8 6}.neutral{fill:#f3f5f7;stroke:#7a838d;stroke-width:1.35}
-    .rgb{fill:#deefd8;stroke:#66a05d;stroke-width:1.5}.nir{fill:#dceaf7;stroke:#618fc0;stroke-width:1.5}.tir{fill:#f7ddd9;stroke:#cf6b61;stroke-width:1.5}
-    .select{fill:#ece0f2;stroke:#8f6ea0;stroke-width:1.5}.chosen{fill:#fff4a3;stroke:#d2b91f;stroke-width:1.5}
-    .facr{fill:#f7e8bf;stroke:#c79736;stroke-width:1.5}.part{fill:#dff1ee;stroke:#4f9b90;stroke-width:1.5}.output{fill:#e7edf4;stroke:#657c94;stroke-width:1.5}
-    .arrow{fill:none;stroke:#28313a;stroke-width:1.8;marker-end:url(#arrow)}.thin{fill:none;stroke:#4b5560;stroke-width:1.25;marker-end:url(#smallArrow)}
-    .rgbLine{fill:none;stroke:#66a05d;stroke-width:1.7;marker-end:url(#rgbArrow)}.nirLine{fill:none;stroke:#618fc0;stroke-width:1.7;marker-end:url(#nirArrow)}
-    .tirLine{fill:none;stroke:#cf6b61;stroke-width:1.7;marker-end:url(#tirArrow)}.maskLine{fill:none;stroke:#8f6ea0;stroke-width:1.6;stroke-dasharray:5 4;marker-end:url(#maskArrow)}
-    .stopLine{fill:none;stroke:#bd4d4d;stroke-width:2.2;stroke-dasharray:5 4}.muted{fill:#66717d}
-  </style>
-  <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#28313a"/></marker>
-  <marker id="smallArrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5 0 7Z" fill="#4b5560"/></marker>
-  <marker id="rgbArrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#66a05d"/></marker>
-  <marker id="nirArrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#618fc0"/></marker>
-  <marker id="tirArrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#cf6b61"/></marker>
-  <marker id="maskArrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#8f6ea0"/></marker>
-  <g id="tokenStrip">
-    <rect width="18" height="18" rx="2" class="chosen"/><rect x="22" width="18" height="18" rx="2" class="neutral"/><rect x="44" width="18" height="18" rx="2" class="neutral"/>
-    <rect x="66" width="18" height="18" rx="2" class="neutral"/><rect x="88" width="18" height="18" rx="2" class="neutral"/><rect x="110" width="18" height="18" rx="2" class="neutral"/>
-  </g>
-  <g id="maskGrid">
-    <rect width="72" height="48" fill="#fff" stroke="#7b8490"/><path d="M18 0V48M36 0V48M54 0V48M0 16H72M0 32H72" stroke="#a9b0b8" stroke-width=".8"/>
-    <rect x="1" y="1" width="16" height="14" class="chosen"/><rect x="37" y="1" width="16" height="14" class="chosen"/>
-    <rect x="19" y="17" width="16" height="14" class="chosen"/><rect x="55" y="33" width="16" height="14" class="chosen"/>
-  </g>
-  <g id="routingStage">
-    <rect width="170" height="150" rx="4" class="facr"/>
-    <circle cx="45" cy="62" r="17" class="rgb"/><text x="45" y="67" text-anchor="middle" class="label">R</text>
-    <circle cx="125" cy="62" r="17" class="nir"/><text x="125" y="67" text-anchor="middle" class="label">N</text>
-    <circle cx="85" cy="113" r="17" class="tir"/><text x="85" y="118" text-anchor="middle" class="label">T</text>
-    <path d="M63 62H106" class="rgbLine"/><path d="M116 77L97 98" class="nirLine"/><path d="M73 98L54 77" class="tirLine"/>
-    <text x="85" y="140" text-anchor="middle" class="tiny">adaptive routes + gated residual</text>
-  </g>
+ <style>
+ text{font-family:"Times New Roman",Times,serif;fill:#222}.mt{font-size:25px;font-weight:700}.st{font-size:18px;font-weight:700}.lb{font-size:16px;font-weight:700}.tx{font-size:14px}.sm{font-size:12px}.tn{font-size:10.5px}
+ .grp{fill:#fff;stroke:#666;stroke-width:1.7;stroke-dasharray:8 6}.neu{fill:#f3f3f3;stroke:#777;stroke-width:1.35}.r{fill:#ddeed7;stroke:#72a866;stroke-width:1.5}.n{fill:#dfeaf6;stroke:#6d98c5;stroke-width:1.5}.t{fill:#f6dcd8;stroke:#d47469;stroke-width:1.5}.h{fill:#e9ddf0;stroke:#9272a1;stroke-width:1.5}.sel{fill:#fff49a;stroke:#d8be22;stroke-width:1.5}.exp{fill:#f9e7b7;stroke:#d3a646;stroke-width:1.35}.w{fill:#fff;stroke:#777;stroke-width:1.25}
+ .f{fill:none;stroke:#222;stroke-width:1.7;marker-end:url(#a)}.th{fill:none;stroke:#444;stroke-width:1.2;marker-end:url(#as)}.mf{fill:none;stroke:#9272a1;stroke-width:1.5;stroke-dasharray:5 4;marker-end:url(#ap)}.sg{fill:none;stroke:#777;stroke-width:1.7;stroke-dasharray:4 3}.rl{fill:none;stroke:#72a866;stroke-width:1.7;marker-end:url(#ar)}.nl{fill:none;stroke:#6d98c5;stroke-width:1.7;marker-end:url(#an)}.tl{fill:none;stroke:#d47469;stroke-width:1.7;marker-end:url(#at)}.mut{fill:#777}
+ </style>
+ <marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#222"/></marker>
+ <marker id="as" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5 0 7Z" fill="#444"/></marker>
+ <marker id="ap" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#9272a1"/></marker>
+ <marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#72a866"/></marker>
+ <marker id="an" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#6d98c5"/></marker>
+ <marker id="at" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4 0 8Z" fill="#d47469"/></marker>
+ <g id="grid"><rect width="34" height="34" fill="#fff" stroke="#777"/><path d="M11.3 0V34M22.7 0V34M0 11.3H34M0 22.7H34" stroke="#aaa" stroke-width=".8"/></g>
+ <g id="sgrid"><use xlink:href="#grid"/><rect x="1" y="1" width="10" height="10" class="sel"/><rect x="23" y="1" width="10" height="10" class="sel"/><rect x="12" y="12" width="10" height="10" class="sel"/><rect x="1" y="23" width="10" height="10" class="sel"/></g>
+ <g id="facrStage"><rect width="170" height="150" rx="3" class="w"/><circle cx="43" cy="64" r="17" class="r"/><text x="43" y="69" text-anchor="middle" class="lb">R</text><circle cx="127" cy="64" r="17" class="n"/><text x="127" y="69" text-anchor="middle" class="lb">N</text><circle cx="85" cy="113" r="17" class="t"/><text x="85" y="118" text-anchor="middle" class="lb">T</text><path d="M61 64H108" class="rl"/><path d="M117 79L97 98" class="nl"/><path d="M73 98L53 79" class="tl"/><text x="85" y="140" text-anchor="middle" class="tn">adaptive route + gated residual</text></g>
 </defs>
+<rect width="1900" height="820" fill="#fff"/>
 
-<rect width="1900" height="1060" fill="#fff"/>
+<!-- Original color legend -->
+<g transform="translate(25 18)"><rect width="18" height="12" class="r"/><text x="24" y="11" class="sm">RGB</text><rect x="74" width="18" height="12" class="n"/><text x="98" y="11" class="sm">NIR</text><rect x="147" width="18" height="12" class="t"/><text x="171" y="11" class="sm">TIR</text><rect x="218" width="18" height="12" class="h"/><text x="242" y="11" class="sm">selection</text><rect x="326" width="18" height="12" class="sel"/><text x="350" y="11" class="sm">selected token / union</text><rect x="499" width="18" height="12" class="exp"/><text x="523" y="11" class="sm">gate / branch head</text><path d="M655 6H692" class="mf"/><text x="700" y="11" class="sm">HS-mask constraint</text><path d="M835 0V14" class="sg"/><text x="846" y="11" class="sm">stop-gradient</text></g>
 
-<!-- legend -->
-<g transform="translate(24 17)">
-  <rect width="18" height="12" class="rgb"/><text x="25" y="11" class="small">RGB</text>
-  <rect x="77" width="18" height="12" class="nir"/><text x="102" y="11" class="small">NIR</text>
-  <rect x="150" width="18" height="12" class="tir"/><text x="175" y="11" class="small">TIR</text>
-  <rect x="223" width="18" height="12" class="select"/><text x="248" y="11" class="small">selection / mask</text>
-  <rect x="372" width="18" height="12" class="facr"/><text x="397" y="11" class="small">FACR</text>
-  <rect x="455" width="18" height="12" class="part"/><text x="480" y="11" class="small">part branch</text>
-  <path d="M580 6H620" class="maskLine"/><text x="630" y="11" class="small">hard-mask constraint</text>
-  <line x1="785" y1="0" x2="785" y2="14" class="stopLine"/><text x="795" y="11" class="small">stop-gradient boundary</text>
+<!-- Inputs -->
+<g><text x="72" y="62" text-anchor="middle" class="st">Input</text>
+ <image x="23" y="78" width="98" height="188" preserveAspectRatio="xMidYMid slice" xlink:href="input_rgb.png"/><rect x="23" y="78" width="98" height="188" fill="none" stroke="#72a866" stroke-width="3"/><text x="72" y="287" text-anchor="middle" class="lb" fill="#548a4b">RGB</text>
+ <image x="23" y="318" width="98" height="188" preserveAspectRatio="xMidYMid slice" xlink:href="input_nir.png"/><rect x="23" y="318" width="98" height="188" fill="none" stroke="#6d98c5" stroke-width="3"/><text x="72" y="527" text-anchor="middle" class="lb" fill="#527ca7">NIR</text>
+ <image x="23" y="558" width="98" height="188" preserveAspectRatio="xMidYMid slice" xlink:href="input_tir.png"/><rect x="23" y="558" width="98" height="188" fill="none" stroke="#d47469" stroke-width="3"/><text x="72" y="767" text-anchor="middle" class="lb" fill="#bd5e54">TIR</text>
 </g>
 
-<!-- aligned inputs -->
-<g>
-  <text x="73" y="67" text-anchor="middle" class="subhead">Aligned Inputs</text>
-  <image x="24" y="94" width="98" height="164" preserveAspectRatio="xMidYMid slice" xlink:href="input_rgb.png"/>
-  <rect x="24" y="94" width="98" height="164" fill="none" stroke="#66a05d" stroke-width="3"/><text x="73" y="280" text-anchor="middle" class="label">RGB</text>
-  <image x="24" y="354" width="98" height="164" preserveAspectRatio="xMidYMid slice" xlink:href="input_nir.png"/>
-  <rect x="24" y="354" width="98" height="164" fill="none" stroke="#618fc0" stroke-width="3"/><text x="73" y="540" text-anchor="middle" class="label">NIR</text>
-  <image x="24" y="614" width="98" height="164" preserveAspectRatio="xMidYMid slice" xlink:href="input_tir.png"/>
-  <rect x="24" y="614" width="98" height="164" fill="none" stroke="#cf6b61" stroke-width="3"/><text x="73" y="800" text-anchor="middle" class="label">TIR</text>
+<!-- Shared backbone, same framing as the original figure -->
+<g><rect x="154" y="58" width="205" height="724" rx="4" class="grp"/><text x="256" y="88" text-anchor="middle" class="st">Shared ViT-B/16</text><text x="256" y="107" text-anchor="middle" class="sm">ImageNet init. · weight sharing</text>
+ <path d="M121 174H174" class="rl"/><path d="M121 414H174" class="nl"/><path d="M121 654H174" class="tl"/>
+ <g transform="translate(176 126)"><rect width="160" height="124" rx="3" class="r"/><text x="80" y="27" text-anchor="middle" class="lb">Patch Embedding</text><path d="M12 42H148" stroke="#8fb987"/><text x="80" y="68" text-anchor="middle" class="lb">Transformer × 12</text><text x="80" y="90" text-anchor="middle" class="sm">[CLS] + 128 patches</text><use xlink:href="#grid" x="63" y="136"/></g>
+ <g transform="translate(176 366)"><rect width="160" height="124" rx="3" class="n"/><text x="80" y="27" text-anchor="middle" class="lb">Patch Embedding</text><path d="M12 42H148" stroke="#8eb0d3"/><text x="80" y="68" text-anchor="middle" class="lb">Transformer × 12</text><text x="80" y="90" text-anchor="middle" class="sm">[CLS] + 128 patches</text><use xlink:href="#grid" x="63" y="136"/></g>
+ <g transform="translate(176 606)"><rect width="160" height="124" rx="3" class="t"/><text x="80" y="27" text-anchor="middle" class="lb">Patch Embedding</text><path d="M12 42H148" stroke="#dfa29b"/><text x="80" y="68" text-anchor="middle" class="lb">Transformer × 12</text><text x="80" y="90" text-anchor="middle" class="sm">[CLS] + 128 patches</text><use xlink:href="#grid" x="63" y="136"/></g>
 </g>
-
-<!-- shared backbone -->
-<g>
-  <rect x="154" y="58" width="252" height="790" rx="5" class="group"/>
-  <text x="280" y="88" text-anchor="middle" class="head">Shared ViT-B/16</text>
-  <text x="280" y="108" text-anchor="middle" class="small">ImageNet initialization · shared parameters</text>
-  <path d="M122 176H180" class="rgbLine"/><path d="M122 436H180" class="nirLine"/><path d="M122 696H180" class="tirLine"/>
-
-  <g transform="translate(180 130)">
-    <rect width="200" height="105" rx="4" class="rgb"/><text x="100" y="29" text-anchor="middle" class="label">RGB patch embedding</text>
-    <path d="M18 43H182" stroke="#91b78a"/><text x="100" y="67" text-anchor="middle" class="label">Transformer × 12</text><text x="100" y="89" text-anchor="middle" class="small">[CLS] + 128 patch tokens</text>
-    <use xlink:href="#tokenStrip" x="36" y="119"/><text x="100" y="160" text-anchor="middle" class="small">tokens + attention maps</text>
-  </g>
-  <g transform="translate(180 390)">
-    <rect width="200" height="105" rx="4" class="nir"/><text x="100" y="29" text-anchor="middle" class="label">NIR patch embedding</text>
-    <path d="M18 43H182" stroke="#8eb0d3"/><text x="100" y="67" text-anchor="middle" class="label">Transformer × 12</text><text x="100" y="89" text-anchor="middle" class="small">[CLS] + 128 patch tokens</text>
-    <use xlink:href="#tokenStrip" x="36" y="119"/><text x="100" y="160" text-anchor="middle" class="small">tokens + attention maps</text>
-  </g>
-  <g transform="translate(180 650)">
-    <rect width="200" height="105" rx="4" class="tir"/><text x="100" y="29" text-anchor="middle" class="label">TIR patch embedding</text>
-    <path d="M18 43H182" stroke="#dfa29b"/><text x="100" y="67" text-anchor="middle" class="label">Transformer × 12</text><text x="100" y="89" text-anchor="middle" class="small">[CLS] + 128 patch tokens</text>
-    <use xlink:href="#tokenStrip" x="36" y="119"/><text x="100" y="160" text-anchor="middle" class="small">tokens + attention maps</text>
-  </g>
-</g>
-
-<!-- shared complete-token bus -->
-<path d="M380 258H420M380 518H420M380 778H420M420 258V778" fill="none" stroke="#39434d" stroke-width="1.6"/>
-<text x="416" y="833" text-anchor="middle" class="tiny">complete token bus</text>
 
 <!-- HS -->
-<g>
-  <rect x="442" y="58" width="330" height="270" rx="5" class="group"/>
-  <text x="607" y="87" text-anchor="middle" class="title">HS</text>
-  <text x="607" y="108" text-anchor="middle" class="small">hierarchical selection with frequency evidence</text>
-  <path d="M420 258H466V158" class="arrow"/>
-  <rect x="466" y="128" width="126" height="66" rx="4" class="select"/>
-  <text x="529" y="151" text-anchor="middle" class="label">Attention rollout</text><text x="529" y="171" text-anchor="middle" class="small">Top-1 / head, union</text>
-  <rect x="466" y="218" width="126" height="66" rx="4" class="select"/>
-  <text x="529" y="241" text-anchor="middle" class="label">Frequency prior</text><text x="529" y="261" text-anchor="middle" class="small">Haar DWT, Top-10</text>
-  <path d="M592 161H623V191M592 251H623V221" class="thin"/>
-  <circle cx="623" cy="206" r="24" class="chosen"/><text x="623" y="212" text-anchor="middle" class="label">OR</text>
-  <path d="M647 206H672" class="arrow"/><use xlink:href="#maskGrid" x="680" y="182"/>
-  <text x="716" y="250" text-anchor="middle" class="small">shared hard mask</text>
-  <text x="607" y="309" text-anchor="middle" class="small">same selected locations applied to RGB, NIR, and TIR</text>
+<g><rect x="392" y="58" width="346" height="306" rx="4" class="grp"/><text x="565" y="88" text-anchor="middle" class="mt">HS</text><text x="565" y="108" text-anchor="middle" class="sm">complete token selection</text>
+ <path d="M359 166H414M359 276H414" class="f"/><rect x="414" y="128" width="138" height="70" rx="3" class="h"/><text x="483" y="155" text-anchor="middle" class="lb">Attention Rollout</text><text x="483" y="176" text-anchor="middle" class="sm">head-wise Top-1 union</text><rect x="414" y="238" width="138" height="70" rx="3" class="h"/><text x="483" y="265" text-anchor="middle" class="lb">Frequency Mask</text><text x="483" y="286" text-anchor="middle" class="sm">Haar DWT · Top-10</text>
+ <path d="M552 163H592V192M552 273H592V242" class="th"/><circle cx="592" cy="217" r="25" class="sel"/><text x="592" y="222" text-anchor="middle" class="lb">OR</text><path d="M617 217H651" class="f"/><use xlink:href="#sgrid" x="659" y="200"/><text x="676" y="252" text-anchor="middle" class="sm">shared hard mask</text><text x="565" y="340" text-anchor="middle" class="sm">rollout + frequency evidence → selected patches</text>
 </g>
 
-<!-- main selector branch -->
-<g>
-  <rect x="820" y="58" width="410" height="270" rx="5" class="group"/>
-  <text x="1025" y="87" text-anchor="middle" class="head">Main Selector Branch</text>
-  <text x="1025" y="108" text-anchor="middle" class="small">directly trains the primary retrieval representation</text>
-  <path d="M772 206H805V153H842" class="maskLine"/>
-  <path d="M420 258V340H790V133H842" class="arrow"/>
-  <rect x="842" y="124" width="156" height="83" rx="4" class="select"/>
-  <text x="920" y="148" text-anchor="middle" class="label">Mask selected patches</text>
-  <text x="920" y="169" text-anchor="middle" class="small">per modality</text><text x="920" y="188" text-anchor="middle" class="small">CLS + 0.15 × patch mean</text>
-  <path d="M998 166H1027" class="arrow"/>
-  <rect x="1028" y="124" width="178" height="83" rx="4" class="neutral"/>
-  <text x="1117" y="149" text-anchor="middle" class="label">Concatenate R / N / T</text>
-  <text x="1117" y="170" text-anchor="middle" class="small">BNNeck + classifier</text><text x="1117" y="190" text-anchor="middle" class="small">CE + triplet supervision</text>
-  <rect x="911" y="235" width="228" height="52" rx="26" class="output"/>
-  <text x="1025" y="258" text-anchor="middle" class="label">Main descriptor z<tspan baseline-shift="sub" font-size="11">main</tspan></text>
-  <text x="1025" y="278" text-anchor="middle" class="small">3 × 768 = 2304-D · loss × 1.00</text>
-  <path d="M1117 207V230" class="thin"/>
+<!-- Main selector branch occupying the original top-right block -->
+<g><rect x="768" y="58" width="726" height="306" rx="4" class="grp"/><text x="1131" y="88" text-anchor="middle" class="mt">Main Selector Branch</text><text x="1131" y="108" text-anchor="middle" class="sm">HS-selected evidence directly forms the primary retrieval representation</text>
+ <path d="M693 217V120H828" class="mf"/>
+ <g transform="translate(798 132)"><rect width="190" height="178" rx="3" class="w"/><text x="95" y="26" text-anchor="middle" class="lb">Shared Masking</text><g transform="translate(23 52)"><rect width="38" height="30" class="r"/><text x="19" y="20" text-anchor="middle" class="sm">RGB</text><use xlink:href="#sgrid" x="95" y="-2"/><rect y="42" width="38" height="30" class="n"/><text x="19" y="62" text-anchor="middle" class="sm">NIR</text><use xlink:href="#sgrid" x="95" y="40"/><rect y="84" width="38" height="30" class="t"/><text x="19" y="104" text-anchor="middle" class="sm">TIR</text><use xlink:href="#sgrid" x="95" y="82"/><path d="M42 15H89M42 57H89M42 99H89" class="th"/></g></g>
+ <path d="M988 221H1019" class="f"/>
+ <g transform="translate(1020 132)"><rect width="190" height="178" rx="3" class="w"/><text x="95" y="28" text-anchor="middle" class="lb">Selected Context</text><circle cx="95" cy="78" r="28" class="sel"/><text x="95" y="75" text-anchor="middle" class="lb">CLS</text><text x="95" y="92" text-anchor="middle" class="tn">per modality</text><path d="M95 108V125" class="th"/><rect x="28" y="127" width="134" height="30" rx="15" class="h"/><text x="95" y="147" text-anchor="middle" class="sm">CLS + 0.15 × patch mean</text></g>
+ <path d="M1210 221H1241" class="f"/>
+ <g transform="translate(1242 132)"><rect width="190" height="178" rx="3" class="w"/><text x="95" y="28" text-anchor="middle" class="lb">Main Descriptor</text><rect x="24" y="50" width="142" height="45" rx="3" class="neu"/><text x="95" y="70" text-anchor="middle" class="sm">Concat. R / N / T</text><text x="95" y="87" text-anchor="middle" class="sm">BNNeck + classifier</text><path d="M95 95V114" class="th"/><rect x="30" y="116" width="130" height="36" rx="18" class="neu"/><text x="95" y="139" text-anchor="middle" class="lb">2304-D</text><text x="95" y="168" text-anchor="middle" class="tn">CE + triplet · loss × 1.00</text></g>
+ <path d="M1432 221H1475" class="f"/><text x="1465" y="211" class="tn">z<tspan baseline-shift="sub">main</tspan></text>
 </g>
 
-<!-- gradient-isolated FACR -->
-<g>
-  <rect x="820" y="360" width="690" height="390" rx="5" class="group"/>
-  <text x="1165" y="389" text-anchor="middle" class="head">Gradient-Isolated FACR</text>
-  <text x="1165" y="410" text-anchor="middle" class="small">mask-constrained adaptive cross-modal routing on complete tokens</text>
-  <path d="M420 518H785V458H842" class="arrow"/>
-  <line x1="864" y1="430" x2="864" y2="492" class="stopLine"/>
-  <circle cx="864" cy="461" r="24" fill="#fff" stroke="#bd4d4d" stroke-width="1.8"/><text x="864" y="457" text-anchor="middle" class="label" fill="#a63f3f">SG</text><text x="864" y="474" text-anchor="middle" class="tiny" fill="#a63f3f">detach</text>
-  <path d="M772 206H794V426H932V449" class="maskLine"/>
-  <text x="923" y="431" text-anchor="middle" class="tiny">HS hard mask</text>
+<!-- Complete-token bus between rows -->
+<path d="M359 384H824" fill="none" stroke="#222" stroke-width="1.7"/><text x="586" y="379" text-anchor="middle" class="sm">complete RGB / NIR / TIR token bus</text>
 
-  <g transform="translate(900 460)"><use xlink:href="#routingStage"/><text x="85" y="25" text-anchor="middle" class="label">Stage 1</text></g>
-  <path d="M1070 535H1093" class="arrow"/>
-  <g transform="translate(1094 460)"><use xlink:href="#routingStage"/><text x="85" y="25" text-anchor="middle" class="label">Stage 2</text></g>
-  <path d="M1264 535H1287" class="arrow"/>
-  <g transform="translate(1288 460)"><use xlink:href="#routingStage"/><text x="85" y="25" text-anchor="middle" class="label">Stage 3</text></g>
-  <rect x="987" y="641" width="356" height="72" rx="4" class="neutral"/>
-  <text x="1165" y="666" text-anchor="middle" class="label">Independent aggregation, BNNeck, classifier</text>
-  <text x="1165" y="688" text-anchor="middle" class="small">z<tspan baseline-shift="sub" font-size="10">facr</tspan>: 3 × 768 = 2304-D · branch loss × 0.50</text>
-  <path d="M1165 610V637" class="thin"/>
-  <text x="1165" y="735" text-anchor="middle" class="small" fill="#a63f3f">FACR gradients cannot alter the shared backbone or main selector path</text>
+<!-- Three-stripe part branch in the original PLR position -->
+<g><rect x="392" y="402" width="424" height="380" rx="4" class="grp"/><text x="604" y="432" text-anchor="middle" class="mt">Three-Stripe Part Branch</text><text x="604" y="452" text-anchor="middle" class="sm">coarse local representation from HS-masked patches</text><path d="M693 234V384H424V485" class="mf"/>
+ <g transform="translate(425 478)"><text y="26" class="lb" fill="#548a4b">RGB</text><use xlink:href="#sgrid" x="51" y="2"/><path d="M93 19H123" class="th"/><g class="r"><rect x="124" width="42" height="12"/><rect x="124" y="14" width="42" height="12"/><rect x="124" y="28" width="42" height="12"/></g><text x="145" y="58" text-anchor="middle" class="tn">3 stripes</text><path d="M168 20H204" class="th"/><rect x="205" y="5" width="108" height="30" class="r"/><text x="259" y="25" text-anchor="middle" class="sm">stripe features</text></g>
+ <g transform="translate(425 568)"><text y="26" class="lb" fill="#527ca7">NIR</text><use xlink:href="#sgrid" x="51" y="2"/><path d="M93 19H123" class="th"/><g class="n"><rect x="124" width="42" height="12"/><rect x="124" y="14" width="42" height="12"/><rect x="124" y="28" width="42" height="12"/></g><text x="145" y="58" text-anchor="middle" class="tn">3 stripes</text><path d="M168 20H204" class="th"/><rect x="205" y="5" width="108" height="30" class="n"/><text x="259" y="25" text-anchor="middle" class="sm">stripe features</text></g>
+ <g transform="translate(425 658)"><text y="26" class="lb" fill="#bd5e54">TIR</text><use xlink:href="#sgrid" x="51" y="2"/><path d="M93 19H123" class="th"/><g class="t"><rect x="124" width="42" height="12"/><rect x="124" y="14" width="42" height="12"/><rect x="124" y="28" width="42" height="12"/></g><text x="145" y="58" text-anchor="middle" class="tn">3 stripes</text><path d="M168 20H204" class="th"/><rect x="205" y="5" width="108" height="30" class="t"/><text x="259" y="25" text-anchor="middle" class="sm">stripe features</text></g>
+ <path d="M738 498H776V687M738 588H776M738 678H776" class="th"/><circle cx="776" cy="715" r="20" class="w"/><text x="776" y="720" text-anchor="middle" class="lb">C</text><text x="776" y="748" text-anchor="middle" class="sm">6912-D</text><text x="604" y="767" text-anchor="middle" class="tn">3 modalities × 3 stripes × 768 · loss × 0.15</text>
 </g>
 
-<!-- part branch -->
-<g>
-  <rect x="442" y="862" width="1068" height="164" rx="5" class="group"/>
-  <text x="470" y="892" class="head">Three-Stripe Part Branch</text>
-  <text x="470" y="915" class="small">HS-masked feature maps preserve coarse body layout</text>
-  <path d="M716 230V842H499V929" class="maskLine"/>
-
-  <g transform="translate(500 930)"><rect width="58" height="60" class="rgb"/><path d="M0 20H58M0 40H58" stroke="#78a870"/><text x="29" y="17" text-anchor="middle" class="tiny">stripe 1</text><text x="29" y="37" text-anchor="middle" class="tiny">stripe 2</text><text x="29" y="57" text-anchor="middle" class="tiny">stripe 3</text></g>
-  <g transform="translate(570 930)"><rect width="58" height="60" class="nir"/><path d="M0 20H58M0 40H58" stroke="#7ca2c8"/><text x="29" y="17" text-anchor="middle" class="tiny">stripe 1</text><text x="29" y="37" text-anchor="middle" class="tiny">stripe 2</text><text x="29" y="57" text-anchor="middle" class="tiny">stripe 3</text></g>
-  <g transform="translate(640 930)"><rect width="58" height="60" class="tir"/><path d="M0 20H58M0 40H58" stroke="#d78981"/><text x="29" y="17" text-anchor="middle" class="tiny">stripe 1</text><text x="29" y="37" text-anchor="middle" class="tiny">stripe 2</text><text x="29" y="57" text-anchor="middle" class="tiny">stripe 3</text></g>
-  <path d="M704 960H773" class="arrow"/>
-  <rect x="774" y="925" width="256" height="70" rx="4" class="part"/>
-  <text x="902" y="950" text-anchor="middle" class="label">Stripe mean pooling</text><text x="902" y="972" text-anchor="middle" class="small">3 modalities × 3 stripes × 768</text>
-  <path d="M1030 960H1075" class="arrow"/>
-  <rect x="1076" y="925" width="268" height="70" rx="4" class="neutral"/>
-  <text x="1210" y="950" text-anchor="middle" class="label">Concatenate + BNNeck + classifier</text><text x="1210" y="972" text-anchor="middle" class="small">z<tspan baseline-shift="sub" font-size="10">part</tspan>: 6912-D · branch loss × 0.15</text>
-  <path d="M1344 960H1488" class="arrow"/>
+<!-- Gradient-isolated FACR in the original lower fusion position -->
+<g><rect x="846" y="402" width="648" height="380" rx="4" class="grp"/><text x="1170" y="432" text-anchor="middle" class="mt">Gradient-Isolated FACR</text><text x="1170" y="452" text-anchor="middle" class="sm">three-stage mask-constrained adaptive cross-modal routing</text>
+ <path d="M824 384V570H848" class="f"/><circle cx="873" cy="570" r="21" class="w"/><path d="M873 543V597" class="sg"/><text x="873" y="567" text-anchor="middle" class="lb">SG</text><text x="873" y="583" text-anchor="middle" class="tn">detach</text><path d="M894 570H909" class="f"/>
+ <path d="M693 235V384H996V481" class="mf"/><text x="960" y="475" class="tn">hard mask</text>
+ <g transform="translate(910 492)"><use xlink:href="#facrStage"/><text x="85" y="24" text-anchor="middle" class="lb">Stage 1</text></g><path d="M1080 567H1099" class="f"/>
+ <g transform="translate(1100 492)"><use xlink:href="#facrStage"/><text x="85" y="24" text-anchor="middle" class="lb">Stage 2</text></g><path d="M1270 567H1289" class="f"/>
+ <g transform="translate(1290 492)"><use xlink:href="#facrStage"/><text x="85" y="24" text-anchor="middle" class="lb">Stage 3</text></g>
+ <path d="M1375 642V666" class="th"/><rect x="1088" y="667" width="332" height="60" rx="3" class="exp"/><text x="1254" y="691" text-anchor="middle" class="lb">Independent BNNeck + classifier</text><text x="1254" y="712" text-anchor="middle" class="sm">2304-D · branch loss × 0.50</text><path d="M1420 697H1475" class="f"/><text x="1438" y="687" class="tn">z<tspan baseline-shift="sub">facr</tspan></text><text x="1170" y="760" text-anchor="middle" class="sm mut">FACR gradients cannot alter the shared backbone or main selector branch</text>
 </g>
 
-<!-- final retrieval descriptor -->
-<g>
-  <rect x="1544" y="120" width="332" height="780" rx="5" class="group"/>
-  <text x="1710" y="153" text-anchor="middle" class="head">Final Retrieval Descriptor</text>
-  <text x="1710" y="175" text-anchor="middle" class="small">fixed inference composition</text>
-
-  <path d="M1230 261H1518V247H1570" class="arrow"/>
-  <rect x="1570" y="215" width="280" height="72" rx="4" class="output"/>
-  <text x="1590" y="240" class="label">Main selector</text><text x="1590" y="263" class="small">L2Norm(z<tspan baseline-shift="sub" font-size="10">main</tspan>)</text><text x="1828" y="253" text-anchor="end" class="label">2304-D × 1.00</text>
-
-  <path d="M1510 677H1528V405H1570" class="arrow"/>
-  <rect x="1570" y="369" width="280" height="72" rx="4" class="facr"/>
-  <text x="1590" y="394" class="label">Isolated FACR</text><text x="1590" y="417" class="small">L2Norm(z<tspan baseline-shift="sub" font-size="10">facr</tspan>)</text><text x="1828" y="407" text-anchor="end" class="label">2304-D × 0.25</text>
-
-  <path d="M1488 960H1528V563H1570" class="arrow"/>
-  <rect x="1570" y="527" width="280" height="72" rx="4" class="part"/>
-  <text x="1590" y="552" class="label">Three-stripe part</text><text x="1590" y="575" class="small">L2Norm(z<tspan baseline-shift="sub" font-size="10">part</tspan>)</text><text x="1828" y="565" text-anchor="end" class="label">6912-D × 0.30</text>
-
-  <path d="M1850 251H1860V680H1827M1850 405H1860M1850 563H1860" class="thin"/>
-  <rect x="1600" y="648" width="220" height="64" rx="5" class="neutral"/>
-  <text x="1710" y="675" text-anchor="middle" class="label">Block concatenation</text><text x="1710" y="697" text-anchor="middle" class="small">no learned test-time weights</text>
-  <path d="M1710 712V753" class="arrow"/>
-  <rect x="1591" y="755" width="238" height="78" rx="39" class="output"/>
-  <text x="1710" y="785" text-anchor="middle" class="subhead">11,520-D descriptor</text>
-  <text x="1710" y="807" text-anchor="middle" class="small">single view · cosine distance</text>
-  <text x="1710" y="861" text-anchor="middle" class="small">No TTA · No re-ranking · No DHF/CRUF</text>
+<!-- Final descriptor, same compact vertical structure as the original -->
+<g><rect x="1530" y="402" width="346" height="380" rx="4" class="grp"/><text x="1703" y="432" text-anchor="middle" class="mt">Final Descriptor</text><text x="1703" y="452" text-anchor="middle" class="sm">branch norm. → fixed weight → concatenate</text>
+ <path d="M1494 221H1518V493H1560" class="f"/><rect x="1560" y="468" width="198" height="50" class="neu"/><text x="1576" y="490" class="lb">Main selector</text><text x="1576" y="508" class="sm">2304-D</text><text x="1738" y="498" text-anchor="end" class="lb">× 1.00</text>
+ <path d="M1475 697H1518V561H1560" class="f"/><rect x="1560" y="536" width="198" height="50" class="neu"/><text x="1576" y="558" class="lb">Isolated FACR</text><text x="1576" y="576" class="sm">2304-D</text><text x="1738" y="566" text-anchor="end" class="lb">× 0.25</text>
+ <path d="M796 715H826V795H1518V629H1560" class="f"/><rect x="1560" y="604" width="198" height="50" class="neu"/><text x="1576" y="626" class="lb">Three-stripe part</text><text x="1576" y="644" class="sm">6912-D</text><text x="1738" y="634" text-anchor="end" class="lb">× 0.30</text>
+ <path d="M1758 493H1801V654M1758 561H1801M1758 629H1801" class="th"/><circle cx="1801" cy="682" r="25" class="w"/><text x="1801" y="688" text-anchor="middle" class="lb">C</text><path d="M1801 707V724" class="f"/><rect x="1588" y="726" width="238" height="40" rx="20" class="w"/><text x="1707" y="746" text-anchor="middle" class="lb">11,520-D retrieval descriptor</text><text x="1707" y="761" text-anchor="middle" class="tn">single view · no TTA · no re-ranking</text>
 </g>
-
-<!-- footer -->
-<text x="24" y="1049" class="small muted">Frozen E060 architecture. HS uses fixed Top-1 per attention head; FACR is independently supervised through detached backbone tokens.</text>
 </svg>
