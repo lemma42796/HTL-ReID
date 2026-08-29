@@ -261,6 +261,8 @@ def _loader_options(num_workers, seed, persistent=False):
         options.update(
             persistent_workers=bool(persistent),
             prefetch_factor=2,
+            # Do not wait forever if a worker stalls in image decoding or I/O.
+            timeout=60,
         )
     return options
 

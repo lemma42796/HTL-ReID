@@ -2,42 +2,48 @@ from PIL import Image, ImageFile
 
 from torch.utils.data import Dataset
 import os.path as osp
+import time
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+_IMAGE_READ_MAX_ATTEMPTS = 3
+_IMAGE_READ_RETRY_DELAY_SECONDS = 0.05
+
+
+def _open_image(img_path, convert_rgb=False):
+    """Load one image with bounded retries and close its file handle."""
+    if not osp.exists(img_path):
+        raise IOError("{} does not exist".format(img_path))
+
+    last_error = None
+    for attempt in range(1, _IMAGE_READ_MAX_ATTEMPTS + 1):
+        try:
+            with Image.open(img_path) as source:
+                if convert_rgb:
+                    return source.convert('RGB')
+                # PIL decodes lazily. copy() forces the pixels to be loaded
+                # before the context manager closes the underlying file.
+                return source.copy()
+        except OSError as error:
+            last_error = error
+            if attempt < _IMAGE_READ_MAX_ATTEMPTS:
+                time.sleep(_IMAGE_READ_RETRY_DELAY_SECONDS)
+
+    raise IOError(
+        "failed to read '{}' after {} attempts".format(
+            img_path, _IMAGE_READ_MAX_ATTEMPTS)
+    ) from last_error
+
 
 def read_image(img_list):
-    """Keep reading image until succeed.
-    This can avoid IOError incurred by heavy IO process."""
-    if type(img_list) ==type("This is a str"):
+    """Read one packed image or a list of modality image paths."""
+    if isinstance(img_list, str):
         img_path = img_list
-        got_img = False
-        if not osp.exists(img_path):
-            raise IOError("{} does not exist".format(img_path))
-        while not got_img:
-            try:
-                img = Image.open(img_path).convert('RGB')
-                #判断图像的宽度是256的几倍，如果是三倍，则进行下面的代码，否则只裁剪前两个
-                img3 = [img.crop((256 * i, 0, 256 * (i + 1), 128)) for i in range(img.size[0] // 256)]
-                got_img = True
-            except IOError:
-                print("IOError incurred when reading '{}'. Will redo. Don't worry. Just chill.".format(img_path))
-                pass
+        img = _open_image(img_path, convert_rgb=True)
+        #判断图像的宽度是256的几倍，如果是三倍，则进行下面的代码，否则只裁剪前两个
+        img3 = [img.crop((256 * i, 0, 256 * (i + 1), 128)) for i in range(img.size[0] // 256)]
     else:
-        img3 = []
-        for i in img_list:
-            img_path = i
-            got_img = False
-            if not osp.exists(img_path):
-                raise IOError("{} does not exist".format(img_path))
-            while not got_img:
-                try:
-                    img = Image.open(img_path)
-                    img3.append(img)
-                    got_img = True
-                except IOError:
-                    print("IOError incurred when reading '{}'. Will redo. Don't worry. Just chill.".format(img_path))
-                    pass
+        img3 = [_open_image(img_path) for img_path in img_list]
     return img3
 
 
@@ -100,7 +106,7 @@ class ImageDataset(Dataset):
 
         if self.transform is not None:
             img = [self.transform(img) for img in img3]
-        if type(img_path) == type("This is a str"):
+        if isinstance(img_path, str):
             return img, pid, camid, trackid, img_path.split('/')[-1]
         else:
             return img, pid, camid, trackid, img_path[0].split('/')[-1]
